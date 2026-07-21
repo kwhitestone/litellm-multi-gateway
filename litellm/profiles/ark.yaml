@@ -1,0 +1,38 @@
+# profile: ark
+# desc: 火山方舟 coding plan (纯文本端点, 需配 vision 插件看图)
+#
+# 切换后建议:
+#   docker compose --profile vision up -d
+#   Claude Code BASE_URL = http://127.0.0.1:4001
+---
+model_list:
+  - model_name: glm-5.2
+    litellm_params:
+      model: anthropic/glm-5.2
+      api_base: https://ark.cn-beijing.volces.com/api/coding
+      api_key: os.environ/ARK_API_KEY
+
+  # Claude Code 默认模型名 → 全部别名到 glm-5.2（不配 *_MODEL 时靠这些接住）
+  - model_name: claude-sonnet-5
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
+  - model_name: claude-opus-4-8
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
+  - model_name: claude-haiku-4-5-20251001
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
+  - model_name: claude-fable-5
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
+  - model_name: claude-opus-4-1
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
+  - model_name: claude-3-5-sonnet-20241022
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
+  - model_name: claude-3-5-haiku-20241022
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 600
+  num_retries: 2
+
+general_settings:
+  database_url: postgresql://litellm:litellm@db:5432/litellm
+  master_key: os.environ/ARK_API_KEY
