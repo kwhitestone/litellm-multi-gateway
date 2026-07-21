@@ -1,0 +1,25 @@
+# LiteLLM 配置 —— 把你的 provider 接进来。
+#
+# 默认示例：火山方舟 ark coding plan（纯文本端点）。
+# 换别的 provider：改下面 model_list 里的 model / api_base / api_key 即可。
+#
+# 注意：
+# - 配合 vision 插件时，图片会在到达 LiteLLM 之前就被转成文字，所以这里【不需要】任何
+#   middleware/hook（LiteLLM 的 pre_call_hook 在 /v1/messages 上有 open bug 不触发）。
+# - master_key 默认设成 ARK_API_KEY，vision 插件转发时带它即可打通鉴权。
+
+model_list:
+  - model_name: glm-5.2            # Claude Code 请求里带的 model 名（见 settings *_MODEL）
+    litellm_params:
+      model: anthropic/glm-5.2     # anthropic provider => Anthropic Messages 格式透传
+      api_base: https://ark.cn-beijing.volces.com/api/coding   # 你的 provider 端点
+      api_key: os.environ/ARK_API_KEY
+
+litellm_settings:
+  drop_params: true                # 丢掉 provider 不支持的参数，提高兼容性
+  request_timeout: 600
+  num_retries: 2
+
+general_settings:
+  database_url: postgresql://litellm:litellm@db:5432/litellm   # db 是 compose 里的服务名
+  master_key: os.environ/ARK_API_KEY

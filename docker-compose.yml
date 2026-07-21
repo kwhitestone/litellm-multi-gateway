@@ -1,0 +1,71 @@
+# cc-litellm-gateway
+# 以 LiteLLM 为底层的 Claude Code 网关。核心 = litellm + postgres；
+# vision（图片转文字）是可选插件，用 compose profile 控制。
+#
+# 启动：
+#   仅核心网关：        docker compose up -d
+#   核心 + 视觉插件：   docker compose --profile vision up -d
+#   停止：             docker compose down
+#
+# Claude Code 指向（ANTHROPIC_BASE_URL）：
+#   仅核心：   http://127.0.0.1:4000   （直连 litellm）
+#   带视觉：   http://127.0.0.1:4001   （经 vision 转图后再到 litellm）
+#
+# Admin UI： http://127.0.0.1:4000/ui   （登录见 .env 的 UI_USERNAME/UI_PASSWORD 或用 master key）
+
+services:
+  db:
+    image: postgres:16-alpine
+    # 不对外暴露端口，仅 compose 内网供 litellm 访问（需要调试可加 ports）
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-litellm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-litellm}
+      POSTGRES_DB: ${POSTGRES_DB:-litellm}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-litellm}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      UI_USERNAME: ${UI_USERNAME:-admin}
+      UI_PASSWORD: ${UI_PASSWORD:-admin}
+      STORE_MODEL_IN_DB: "True"
+      # provider key（默认 ark），vision 插件也复用同一个 key 鉴权
+      ARK_API_KEY: ${ARK_API_KEY}
+      Z_AI_API_KEY: ${Z_AI_API_KEY}
+      VISION_API_KEY: ${VISION_API_KEY:-}
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command: --config /app/config.yaml --port 4000 --num_workers 2
+    ports:
+      - "127.0.0.1:4000:4000"   # Admin UI + 直连入口
+    restart: unless-stopped
+
+  # ===== 可选插件：视觉（默认不启动，需 --profile vision） =====
+  vision:
+    profiles: ["vision"]
+    build: ./vision
+    depends_on:
+      - litellm
+    environment:
+      DOWNSTREAM_URL: http://litellm:4000          # 容器内用服务名
+      DOWNSTREAM_KEY: ${ARK_API_KEY}               # = litellm master_key，打通鉴权
+      # 视觉模型（默认智谱 glm-4.6v，可换任意 OpenAI 兼容视觉模型）
+      VISION_API_KEY: ${VISION_API_KEY:-${Z_AI_API_KEY}}
+      VISION_BASE_URL: ${VISION_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
+      VISION_MODEL: ${VISION_MODEL:-glm-4.6v}
+    ports:
+      - "127.0.0.1:4001:4001"   # Claude Code 入口（带视觉时用这个）
+    restart: unless-stopped
+
+volumes:
+  pg-data:
