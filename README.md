@@ -33,6 +33,8 @@ git clone <repo> cc-litellm-gateway && cd cc-litellm-gateway
 cp .env.example .env
 # 编辑 .env：填 ARK_API_KEY（你的 coding provider token）和 Z_AI_API_KEY（视觉模型 key）
 
+./switch.sh ark          # 生成 litellm/config.yaml（默认 ark；可换 ./switch.sh zai）
+
 # 起核心 + 视觉插件
 docker compose --profile vision up -d
 # 等 ~40s（postgres 初始化 + litellm 迁移）
@@ -81,6 +83,22 @@ model_list:
 ```
 
 `model_name` 要和 Claude Code settings 里的 `*_MODEL` 一致。
+
+### 切换预制 profile（一键切后端）
+
+`litellm/profiles/` 里预置了几套 provider 配置，用 `switch.sh` 一键切换（自动重启 litellm）：
+
+```bash
+./switch.sh            # 看有哪些 profile + 当前在用哪个
+./switch.sh ark        # 火山方舟 coding plan（纯文本，配 vision）
+./switch.sh zai        # 智谱 BigModel（原生多模态，无需 vision）
+```
+
+切换后按提示调整：ark 用 `--profile vision` + BASE_URL `:4001`；zai 不带 vision + BASE_URL `:4000`。
+
+> 想加自己的 profile？复制 `litellm/profiles/ark.yaml` 改一改，文件名就是 profile 名（`./switch.sh 你的名`）。
+
+**关于模型名映射**：Claude Code 不配 `*_MODEL` 时会发默认的 Anthropic 模型名（`claude-sonnet-5` 等）。每个 profile 的 `model_list` 里把这些名字都列出来、指向你的实际模型，LiteLLM 就会自动转换——所以 Claude Code 配置可以极简（只留 BASE_URL + token），模型路由全由 LiteLLM 接管。
 
 ### 换视觉模型（默认智谱 glm-4.6v）
 

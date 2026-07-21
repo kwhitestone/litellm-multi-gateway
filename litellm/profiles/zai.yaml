@@ -1,0 +1,38 @@
+# profile: zai
+# desc: 智谱 BigModel (原生多模态, 端点自带视觉, 无需 vision 插件)
+#
+# 切换后建议:
+#   docker compose up -d   (不带 --profile vision)
+#   Claude Code BASE_URL = http://127.0.0.1:4000
+---
+model_list:
+  - model_name: glm-4.7
+    litellm_params:
+      model: anthropic/glm-4.7
+      api_base: https://open.bigmodel.cn/api/anthropic
+      api_key: os.environ/Z_AI_API_KEY
+
+  # Claude Code 默认模型名 → 全部别名到 glm-4.7
+  - model_name: claude-sonnet-5
+    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
+  - model_name: claude-opus-4-8
+    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
+  - model_name: claude-haiku-4-5-20251001
+    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
+  - model_name: claude-fable-5
+    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
+  - model_name: claude-opus-4-1
+    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
+  - model_name: claude-3-5-sonnet-20241022
+    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
+  - model_name: claude-3-5-haiku-20241022
+    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 600
+  num_retries: 2
+
+general_settings:
+  database_url: postgresql://litellm:litellm@db:5432/litellm
+  master_key: os.environ/ARK_API_KEY   # 网关访问密钥固定用 ARK_API_KEY，与后端 provider 解耦
