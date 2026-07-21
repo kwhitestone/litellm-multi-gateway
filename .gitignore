@@ -1,0 +1,19 @@
+# 密钥 / 本地配置
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Docker 本地卷数据
+pg-data/
+
+# 系统 / 编辑器
+.DS_Store
+*.swp
+.idea/
+.vscode/
