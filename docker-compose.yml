@@ -1,4 +1,4 @@
-# cc-litellm-gateway
+# litellm-multi-gateway
 # 以 LiteLLM 为底层的 Claude Code 网关。核心 = litellm + postgres；
 # vision（图片转文字）是可选插件，用 compose profile 控制。
 #

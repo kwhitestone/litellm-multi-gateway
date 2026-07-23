@@ -97,6 +97,53 @@ async def _describe(block: dict) -> str:
     return text
 
 
+async def _describe_openai(block: dict) -> str:
+    """处理 OpenAI 格式的 image_url 块：{image_url:{url:"data:..." 或 "https://..."}}。"""
+    if not VISION_API_KEY:
+        return "[image skipped: VISION_API_KEY not set]"
+    url = ((block.get("image_url") or {}).get("url")) or ""
+    if not url:
+        return "[image: empty]"
+    # data URL: data:image/png;base64,xxxx
+    if url.startswith("data:"):
+        # 解析出 media_type 和 base64，复用缓存逻辑
+        header, _, b64 = url.partition(",")
+        media_type = "image/png"
+        if ";" in header and "/" in header:
+            media_type = header.split(":")[1].split(";")[0]
+        # 复用 _describe 的缓存（按 base64 内容哈希）
+        return await _describe({"source": {"media_type": media_type, "data": b64, "type": "base64"}})
+    # http(s) URL：视觉模型多数支持直接传 URL
+    key = "url:" + url[:64]
+    if key in _cache:
+        return _cache[key]
+    payload = {
+        "model": VISION_MODEL,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": DESC_PROMPT},
+                {"type": "image_url", "image_url": {"url": url}},
+            ],
+        }],
+        "max_tokens": 1200,
+        "temperature": 0.2,
+    }
+    headers = {"Authorization": f"Bearer {VISION_API_KEY}", "Content-Type": "application/json"}
+    _log(f"调用 {VISION_MODEL} 描述图片(url, {url[:60]}...)...")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as c:
+            r = await c.post(f"{VISION_BASE_URL}/chat/completions", json=payload, headers=headers)
+            r.raise_for_status()
+            text = r.json()["choices"][0]["message"]["content"]
+    except Exception as exc:
+        _log(f"视觉模型调用失败(url): {exc!r}")
+        return f"[image describe failed: {exc}]"
+    text = (text or "").strip()
+    _cache[key] = text
+    return text
+
+
 async def _walk(blocks: list, ctx: dict) -> list:
     out: list = []
     for block in blocks:
@@ -104,8 +151,14 @@ async def _walk(blocks: list, ctx: dict) -> list:
             out.append(block)
             continue
         btype = block.get("type")
+        # Anthropic 格式: {type:"image", source:{...}}
         if btype == "image" and ctx["n_img"] < MAX_IMAGES:
             desc = await _describe(block)
+            ctx["n_img"] += 1
+            out.append({"type": "text", "text": f"[image, described by {VISION_MODEL}]\n{desc}"})
+        # OpenAI 格式: {type:"image_url", image_url:{url:"data:..." 或 "https://..."}}
+        elif btype == "image_url" and ctx["n_img"] < MAX_IMAGES:
+            desc = await _describe_openai(block)
             ctx["n_img"] += 1
             out.append({"type": "text", "text": f"[image, described by {VISION_MODEL}]\n{desc}"})
         elif btype in ("thinking", "redacted_thinking"):
@@ -156,7 +209,9 @@ async def handle(request: Request):
     raw = await request.body()
     path = request.url.path
 
-    if request.method == "POST" and path.startswith("/v1/messages"):
+    if request.method == "POST" and (
+        path.startswith("/v1/messages") or path.startswith("/v1/chat/completions")
+    ):
         try:
             data = json.loads(raw) if raw else None
             if isinstance(data, dict):
@@ -165,8 +220,13 @@ async def handle(request: Request):
         except Exception as exc:
             _log(f"transform 抛异常，透传原请求: {exc!r}")
 
+    # 优先保留客户端自带的 Authorization（虚拟 key），让 litellm 按 key 识别 user/统计用量；
+    # 客户端没带时才用 DOWNSTREAM_KEY（master key）兜底。
     fwd_headers = {k: v for k, v in request.headers.items() if k.lower() not in REQ_HOP}
-    if DOWNSTREAM_KEY:
+    client_auth = request.headers.get("authorization") or request.headers.get("x-api-key")
+    if client_auth:
+        fwd_headers["authorization"] = client_auth
+    elif DOWNSTREAM_KEY:
         fwd_headers["authorization"] = f"Bearer {DOWNSTREAM_KEY}"
     if request.method in ("POST", "PUT", "PATCH"):
         fwd_headers["content-type"] = "application/json"
