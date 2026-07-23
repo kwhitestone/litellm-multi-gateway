@@ -1,25 +1,27 @@
-# cc-litellm-gateway
+# litellm-multi-gateway
 
-以 [LiteLLM](https://github.com/BerriAI/litellm) 为底层的 Claude Code 网关，自带 **Admin UI + 多 provider 路由 + 用量记录**；并可选挂载一个 **vision 插件**，让「只支持文本」的 coding 端点（如火山方舟 ark coding plan）也能处理图片。
+以 [LiteLLM](https://github.com/BerriAI/litellm) 为底层的多客户端 AI 网关，自带 **Admin UI + 多 provider 路由 + 用量按客户端分开统计**；并可选挂载一个 **vision 插件**，让「只支持文本」的 coding 端点（如火山方舟 ark coding plan）也能处理图片。支持 Anthropic 格式（Claude Code 等）和 OpenAI 格式（Hermes 等）客户端同时接入。
 
 ```
-                    ┌─────────────────────────────────────────────┐
-Claude Code ──────▶ │  vision(可选)  ──▶  litellm  ──▶  你的 provider │
-http://127.0.0.1:   │  图片→文字        Admin UI     (ark/openai/…)   │
-  4001 带视觉        │                  :4000                         │
-  4000 仅核心        └─────────────────────────────────────────────┘
-                       postgres(用量/虚拟 key)
+Claude Code  ─(sk-cc-xxx, anthropic)──▶
+                                     ┌──────────────────────────────────────────┐
+Hermes       ─(sk-hermes-yyy, openai)─▶  vision(可选) ──▶ litellm ──▶ provider   │
+        http://127.0.0.1:4001          │  图片→文字       Admin UI    (ark/zai/…) │
+        http://127.0.0.1:4000 (仅核心)  │                 :4000                   │
+                                     └──────────────────────────────────────────┘
+                                         postgres(用量按 user/key 分开统计)
 ```
 
 ## 为什么需要
 
 - 想用**便宜的 coding plan**（纯文本端点），但它**不支持图片**。
 - 又想要 **Admin UI 看用量、管 key、配多 provider**。
+- 多个客户端（Claude Code、Hermes…）共用一个网关，但**用量要按客户端分开统计**。
 - vision 插件把图片先转成文字描述，再喂给纯文本端点 —— 报错截图 / UI 稿 / 流程图这类足够用。
 
 ## 两种用法
 
-| 模式 | 启动命令 | Claude Code `ANTHROPIC_BASE_URL` |
+| 模式 | 启动命令 | 客户端 BASE_URL |
 |---|---|---|
 | 仅核心网关 | `docker compose up -d` | `http://127.0.0.1:4000` |
 | 核心 + 视觉插件 | `docker compose --profile vision up -d` | `http://127.0.0.1:4001` |
@@ -29,7 +31,7 @@ http://127.0.0.1:   │  图片→文字        Admin UI     (ark/openai/…)   
 前置：装好 Docker（Docker Desktop 或 Colima）。
 
 ```bash
-git clone <repo> cc-litellm-gateway && cd cc-litellm-gateway
+git clone <repo> litellm-multi-gateway && cd litellm-multi-gateway
 cp .env.example .env
 # 编辑 .env：填 ARK_API_KEY（你的 coding provider token）和 Z_AI_API_KEY（视觉模型 key）
 
@@ -111,14 +113,49 @@ VISION_MODEL=gpt-4o
 
 ## vision 插件做了什么
 
-转发到 litellm 之前，对 Anthropic `/v1/messages` 请求体做归一化：
+转发到 litellm 之前，对请求体做归一化（同时支持两种格式）：
 
-- `{type:image}` → 调视觉模型转成文字描述（按 base64 的 sha256 缓存，不重复调用）
-- `thinking` / `redacted_thinking` / `server_tool_use` 及其配对 `tool_result` → 剥离（纯文本端点不认）
+- **Anthropic `/v1/messages`**：`{type:image, source}` → 转文字；`thinking`/`server_tool_use` 及配对 `tool_result` → 剥离
+- **OpenAI `/v1/chat/completions`**：`{type:image_url, image_url:{url}}` → 转文字（支持 data:base64 和 http(s) URL）
 
-SSE 流式响应、`tool_use` 原样透传，不影响 agentic 流程。
+图片按内容 sha256 / URL 缓存，不重复调用视觉模型。SSE 流式响应、`tool_use` 原样透传。
 
 > 取舍：纯文本端点拿到的是「图片的文字描述」而非像素。看截图/稿/图够用；精确到像素的判断会失真。
+
+## 多客户端 + 用量分开统计（虚拟 key）
+
+给每个客户端发一个独立 key（绑到不同 user），用量自动按 user/key 分开。`cc`（Anthropic 格式）和 `hermes`（OpenAI 格式）可同时接入：
+
+```bash
+MASTER=$(grep '^ARK_API_KEY=' .env | cut -d= -f2)
+
+# 给 Claude Code 建 key（绑 user=cc）
+curl -X POST http://127.0.0.1:4000/key/generate \
+  -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
+  -d '{"user_id":"cc","key_alias":"cc","models":["glm-5.2","claude-sonnet-5"]}'
+
+# 给 Hermes 建 key（绑 user=hermes）
+curl -X POST http://127.0.0.1:4000/key/generate \
+  -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
+  -d '{"user_id":"hermes","key_alias":"hermes","models":["glm-5.2","claude-sonnet-5"]}'
+```
+
+> key 只在创建时返回一次明文，务必保存。也可在 Admin UI → API Key Users / Keys 页面图形化创建。
+
+客户端配置（**用各自的 key，指向 4001 走视觉，或 4000 走纯核心**）：
+
+```jsonc
+// Claude Code (~/.claude/settings.json)
+{ "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:4001",
+    "ANTHROPIC_AUTH_TOKEN": "<cc 的 key>"
+}}
+
+// Hermes (OpenAI 格式)
+// base_url = http://127.0.0.1:4001/v1   api_key = <hermes 的 key>
+```
+
+在 Admin UI → **Usage** 页按 `User` / `API Key` 筛选，即可分别看到 cc、hermes 各自的用量；vision 转发时保留客户端原始 key，所以统计归属准确。
 
 ## 常见问题
 
@@ -130,7 +167,7 @@ SSE 流式响应、`tool_use` 原样透传，不影响 agentic 流程。
 ## 架构 / 文件
 
 ```
-cc-litellm-gateway/
+litellm-multi-gateway/
 ├─ docker-compose.yml     # litellm + db 核心；vision 为 profile 插件
 ├─ litellm/config.yaml    # provider 配置（模板，换这里）
 ├─ vision/                # 可选：图片→文字 + 归一化
