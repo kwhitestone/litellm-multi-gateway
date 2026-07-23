@@ -36,3 +36,5 @@ litellm_settings:
 general_settings:
   database_url: postgresql://litellm:litellm@db:5432/litellm
   master_key: os.environ/ARK_API_KEY
+  store_model_in_db: true                # Admin UI Logs 页查看 request/response 详情（官方两行之一）
+  store_prompts_in_spend_logs: true      # 把请求 messages/响应存进 DB（官方两行之二）
