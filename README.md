@@ -35,7 +35,7 @@ git clone <repo> litellm-multi-gateway && cd litellm-multi-gateway
 cp .env.example .env
 # 编辑 .env：填 ARK_API_KEY（你的 coding provider token）和 Z_AI_API_KEY（视觉模型 key）
 
-./switch.sh ark          # 生成 litellm/config.yaml（默认 ark；可换 ./switch.sh zai）
+./profiles.sh switch ark    # 生成 litellm/config.yaml（默认 ark；可换 ./profiles.sh switch zai）
 
 # 起核心 + 视觉插件
 docker compose --profile vision up -d
@@ -86,19 +86,24 @@ model_list:
 
 `model_name` 要和 Claude Code settings 里的 `*_MODEL` 一致。
 
-### 切换预制 profile（一键切后端）
+### 切换 / 管理 profile（一键切后端）
 
-`litellm/profiles/` 里预置了几套 provider 配置，用 `switch.sh` 一键切换（自动重启 litellm）：
+`litellm/profiles/` 里预置了几套 provider 配置，用 `profiles.sh` 管理（自动重启 litellm）：
 
 ```bash
-./switch.sh            # 看有哪些 profile + 当前在用哪个
-./switch.sh ark        # 火山方舟 coding plan（纯文本，配 vision）
-./switch.sh zai        # 智谱 BigModel（原生多模态，无需 vision）
+./profiles.sh                       # 看有哪些 profile + 当前在用哪个（无参数 = list）
+./profiles.sh switch ark            # 切到火山方舟 coding plan（纯文本，配 vision）
+./profiles.sh switch zai            # 切到智谱 BigModel（原生多模态，无需 vision）
+./profiles.sh new <name> [opts]     # 生成新 profile（交互式或带参数免交互）
+./profiles.sh delete <name>         # 删除 profile（当前在用的不让删）
 ```
 
 切换后按提示调整：ark 用 `--profile vision` + BASE_URL `:4001`；zai 不带 vision + BASE_URL `:4000`。
 
-> 想加自己的 profile？复制 `litellm/profiles/ark.yaml` 改一改，文件名就是 profile 名（`./switch.sh 你的名`）。
+> 想加自己的 profile？两种方式：
+>
+> - **脚本化（推荐）**：`./profiles.sh new myprofile`（交互式问答），或带参数免交互 `./profiles.sh new myprofile --model glm-4.7 --base https://... --key-env Z_AI_API_KEY --proto anthropic`。自动生成全套 Claude Code 别名，结构与 ark/zai 一致。
+> - **手动**：复制 `litellm/profiles/ark.yaml` 改一改，文件名就是 profile 名（`./profiles.sh switch 你的名`）。
 
 **关于模型名映射**：Claude Code 不配 `*_MODEL` 时会发默认的 Anthropic 模型名（`claude-sonnet-5` 等）。每个 profile 的 `model_list` 里把这些名字都列出来、指向你的实际模型，LiteLLM 就会自动转换——所以 Claude Code 配置可以极简（只留 BASE_URL + token），模型路由全由 LiteLLM 接管。
 
@@ -170,6 +175,9 @@ curl -X POST http://127.0.0.1:4000/key/generate \
 litellm-multi-gateway/
 ├─ docker-compose.yml     # litellm + db 核心；vision 为 profile 插件
 ├─ litellm/config.yaml    # provider 配置（模板，换这里）
+├─ litellm/profiles/      # 预制 provider 配置（ark/zai/…），profiles.sh 切换
+├─ profiles.sh            # 管理 profile（new/switch/list/delete）
+├─ keys.sh                # 管理客户端虚拟 key（创建/列表/删除）
 ├─ vision/                # 可选：图片→文字 + 归一化
 │  ├─ Dockerfile
 │  └─ app.py
