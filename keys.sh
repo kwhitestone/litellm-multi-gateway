@@ -20,7 +20,7 @@ keys.sh - 管理客户端访问 key（绑 user，用量按 user 分开统计）
   ./keys.sh                    显示帮助 + 现有 key 列表
   ./keys.sh new <user> [alias] 给某个 user 创建新 key（明文只显示一次，请立即保存）
   ./keys.sh list               列出所有 key（alias / user / hash）
-  ./keys.sh delete <hash>      删除 key（hash 从 list 拿）
+  ./keys.sh delete <hash>      删除 key（hash 从 list 拿，支持前缀匹配）
 
 例:
   ./keys.sh new cc             创建绑 user=cc 的 key
@@ -34,16 +34,16 @@ list_keys() {
   hashes=$(cg "$BASE/key/list" -H "Authorization: Bearer $MASTER" | python3 -c "import json,sys;d=json.load(sys.stdin);print('\n'.join(d.get('keys',[])))" 2>/dev/null || true)
   if [ -z "$hashes" ]; then echo "(还没有 key，或 litellm 没起)"; return; fi
   n=$(echo "$hashes" | grep -c .)
-  echo "key 列表（共 $n 个）："
-  printf "  %-16s %-12s %s\n" "alias" "user" "hash(前16)"
-  echo "  ──────────────── ──────────── ──────────────────"
+  echo "key 列表（共 $n 个，delete 用完整 hash）："
+  printf "  %-18s %-12s %s\n" "alias" "user" "hash"
+  echo "  ────────────────── ──────────── ────────────────────────────────────"
   for h in $hashes; do
     cg "$BASE/key/info?key=$h" -H "Authorization: Bearer $MASTER" \
       | python3 -c "
 import json,sys
 try: d=json.load(sys.stdin); info=d.get('info',{})
 except Exception: info={}
-print('  %-16s %-12s %s' % (str(info.get('key_alias') or '-')[:16], str(info.get('user_id') or '-')[:12], sys.argv[1][:16]))
+print('  %-18s %-12s %s' % (str(info.get('key_alias') or '-')[:18], str(info.get('user_id') or '-')[:12], sys.argv[1]))
 " "$h"
   done
 }
@@ -82,11 +82,36 @@ print('  OpenAI 客户端: base_url=http://127.0.0.1:4001/v1  api_key='+k)
     list_keys
     ;;
   delete)
-    h="${2:?用法: $0 delete <hash>}"
+    q="${2:?用法: $0 delete <hash 或前缀>}"
+    # litellm /key/delete 要完整 hash；用户可能只拿到前缀（list 截断显示），这里解析成完整 hash
+    full=$(cg "$BASE/key/list" -H "Authorization: Bearer $MASTER" \
+      | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+ks=d.get('keys',[])
+q=sys.argv[1]
+hits=[k for k in ks if k==q or k.startswith(q)]
+if not hits: sys.exit(1)
+print(hits[0])   # 取第一个匹配
+" "$q" 2>/dev/null || true)
+    if [ -z "$full" ]; then
+      echo "错误: 没找到匹配 '$q' 的 key（前缀也行）。./keys.sh list 看完整 hash。" >&2
+      exit 1
+    fi
+    [ "$full" != "$q" ] && echo "  匹配到完整 hash: $full"
     cg -X POST "$BASE/key/delete" \
       -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
-      -d "{\"keys\":[\"$h\"]}" \
-      | python3 -c "import json,sys;d=json.load(sys.stdin);print('✓ 删除:',d.get('message','') or d)"
+      -d "{\"keys\":[\"$full\"]}" \
+      | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception as e: print('删除失败(非 JSON 响应):',e); sys.exit(1)
+# litellm 成功返回 {'...':'...','deleted_keys':[...]}，失败返回 {'error':{...}}
+if isinstance(d,dict) and 'error' in d:
+    e=d['error']
+    print('✗ 删除失败:', e.get('message') or e); sys.exit(1)
+print('✓ 删除成功:', d.get('message') or d.get('deleted_keys') or d)
+"
     ;;
   *) echo "未知命令: $1" >&2; show_help >&2; exit 1 ;;
 esac

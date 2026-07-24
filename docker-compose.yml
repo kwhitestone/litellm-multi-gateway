@@ -35,15 +35,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    env_file: .env   # 整体载入 .env：所有 *_KEY（ARK/Z_AI/CLAUDE_CODE/…）自动透传，新增 provider key 无需改这里
     environment:
       UI_USERNAME: ${UI_USERNAME:-admin}
       UI_PASSWORD: ${UI_PASSWORD:-admin}
       STORE_MODEL_IN_DB: "True"
-      # provider key（默认 ark），vision 插件也复用同一个 key 鉴权
-      ARK_API_KEY: ${ARK_API_KEY}
-      Z_AI_API_KEY: ${Z_AI_API_KEY}
-      CLAUDE_CODE_KEY: ${CLAUDE_CODE_KEY}
-      VISION_API_KEY: ${VISION_API_KEY:-}
+      # provider key 由 env_file 注入（ARK_API_KEY / Z_AI_API_KEY / CLAUDE_CODE_KEY / …），
+      # profile 里 os.environ/<NAME> 即可读取；vision 插件也复用 ARK_API_KEY 鉴权
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
     command: --config /app/config.yaml --port 4000 --num_workers 2
@@ -57,6 +55,7 @@ services:
     build: ./vision
     depends_on:
       - litellm
+    env_file: .env   # 同步载入 .env，复用其中的 VISION_* / Z_AI_API_KEY 等
     environment:
       DOWNSTREAM_URL: http://litellm:4000          # 容器内用服务名
       DOWNSTREAM_KEY: ${ARK_API_KEY}               # = litellm master_key，打通鉴权
