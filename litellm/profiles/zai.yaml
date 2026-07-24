@@ -6,27 +6,21 @@
 #   Claude Code BASE_URL = http://127.0.0.1:4000
 ---
 model_list:
-  - model_name: glm-4.7
+  - model_name: glm-5.2
     litellm_params:
-      model: anthropic/glm-4.7
+      model: anthropic/glm-5.2
       api_base: https://open.bigmodel.cn/api/anthropic
       api_key: os.environ/Z_AI_API_KEY
 
-  # Claude Code 默认模型名 → 全部别名到 glm-4.7
+  # Claude Code 默认模型名 → 全部别名到 glm-5.2
   - model_name: claude-sonnet-5
-    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
   - model_name: claude-opus-4-8
-    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
   - model_name: claude-haiku-4-5-20251001
-    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
   - model_name: claude-fable-5
-    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
-  - model_name: claude-opus-4-1
-    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
-  - model_name: claude-3-5-sonnet-20241022
-    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
-  - model_name: claude-3-5-haiku-20241022
-    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
 
 litellm_settings:
   drop_params: true
@@ -35,6 +29,6 @@ litellm_settings:
 
 general_settings:
   database_url: postgresql://litellm:litellm@db:5432/litellm
-  master_key: os.environ/ARK_API_KEY   # 网关访问密钥固定用 ARK_API_KEY，与后端 provider 解耦
+  master_key: os.environ/ARK_API_KEY     # 网关访问密钥固定用 ARK_API_KEY，与后端 provider 解耦
   store_model_in_db: true                # Admin UI Logs 页查看 request/response 详情（官方两行之一）
   store_prompts_in_spend_logs: true      # 把请求 messages/响应存进 DB（官方两行之二）

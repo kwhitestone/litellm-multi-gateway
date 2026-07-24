@@ -21,12 +21,6 @@ model_list:
     litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
   - model_name: claude-fable-5
     litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
-  - model_name: claude-opus-4-1
-    litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
-  - model_name: claude-3-5-sonnet-20241022
-    litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
-  - model_name: claude-3-5-haiku-20241022
-    litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
 
 litellm_settings:
   drop_params: true

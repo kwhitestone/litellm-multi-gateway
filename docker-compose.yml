@@ -42,6 +42,7 @@ services:
       # provider key（默认 ark），vision 插件也复用同一个 key 鉴权
       ARK_API_KEY: ${ARK_API_KEY}
       Z_AI_API_KEY: ${Z_AI_API_KEY}
+      CLAUDE_CODE_KEY: ${CLAUDE_CODE_KEY}
       VISION_API_KEY: ${VISION_API_KEY:-}
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
