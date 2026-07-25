@@ -1,15 +1,14 @@
 # litellm-multi-gateway
 # 以 LiteLLM 为底层的 Claude Code 网关。核心 = litellm + postgres；
-# vision（图片转文字）是可选插件，用 compose profile 控制。
+# vision 常驻在客户端与 litellm 之间，按 profile 的 native_vision 标记决定转图/透传。
 #
-# 启动：
-#   仅核心网关：        docker compose up -d
-#   核心 + 视觉插件：   docker compose --profile vision up -d
-#   停止：             docker compose down
+# 启动：        docker compose up -d
+# 停止：        docker compose down
 #
-# Claude Code 指向（ANTHROPIC_BASE_URL）：
-#   仅核心：   http://127.0.0.1:4000   （直连 litellm）
-#   带视觉：   http://127.0.0.1:4001   （经 vision 转图后再到 litellm）
+# 客户端统一指向（BASE_URL）：
+#   Anthropic(Claude Code) http://127.0.0.1:4001   （经 vision）
+#   OpenAI(Hermes 等)      http://127.0.0.1:4001/v1
+#   直连 litellm(调试用)   http://127.0.0.1:4000
 #
 # Admin UI： http://127.0.0.1:4000/ui   （登录见 .env 的 UI_USERNAME/UI_PASSWORD 或用 master key）
 
@@ -49,9 +48,8 @@ services:
       - "127.0.0.1:4000:4000"   # Admin UI + 直连入口
     restart: unless-stopped
 
-  # ===== 可选插件：视觉（默认不启动，需 --profile vision） =====
+  # ===== vision 前置层（常驻）：按 profile 的 native_vision 标记决定转图/透传 =====
   vision:
-    profiles: ["vision"]
     build: ./vision
     depends_on:
       - litellm
@@ -59,12 +57,14 @@ services:
     environment:
       DOWNSTREAM_URL: http://litellm:4000          # 容器内用服务名
       DOWNSTREAM_KEY: ${ARK_API_KEY}               # = litellm master_key，打通鉴权
-      # 视觉模型（默认智谱 glm-4.6v，可换任意 OpenAI 兼容视觉模型）
+      # 视觉模型（默认智谱 glm-4.6v，仅 native_vision=false 的 profile 会用到）
       VISION_API_KEY: ${VISION_API_KEY:-${Z_AI_API_KEY}}
       VISION_BASE_URL: ${VISION_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
       VISION_MODEL: ${VISION_MODEL:-glm-4.6v}
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro   # 读取当前 profile 的 native_vision 标记
     ports:
-      - "127.0.0.1:4001:4001"   # Claude Code 入口（带视觉时用这个）
+      - "127.0.0.1:4001:4001"   # 客户端入口（统一用这个，切 profile 不用换 base_url）
     restart: unless-stopped
 
 volumes:

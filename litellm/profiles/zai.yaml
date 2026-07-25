@@ -1,5 +1,6 @@
 # profile: zai
 # desc: 智谱 BigModel (原生多模态, 端点自带视觉, 无需 vision 插件)
+# native_vision: true    # 后端原生支持图 -> vision 原图透传, 不转文字
 #
 # 切换后建议:
 #   docker compose up -d   (不带 --profile vision)
