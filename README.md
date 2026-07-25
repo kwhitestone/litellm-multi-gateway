@@ -1,6 +1,6 @@
 # litellm-multi-gateway
 
-以 [LiteLLM](https://github.com/BerriAI/litellm) 为底层的多客户端 AI 网关，自带 **Admin UI + 多 provider 路由 + 用量按客户端分开统计**；并可选挂载一个 **vision 插件**，让「只支持文本」的 coding 端点（如火山方舟 ark coding plan）也能处理图片。支持 Anthropic 格式（Claude Code 等）和 OpenAI 格式（Hermes 等）客户端同时接入。
+以 [LiteLLM](https://github.com/BerriAI/litellm) 为底层的多客户端 AI 网关，自带 **Admin UI + 多 provider 路由 + 用量按客户端分开统计**；前置一个常驻的 **vision 层**，按 profile 自动决定：纯文本后端（如 ark coding plan）把图片转文字，原生多模态后端（如 zai/claude）原图透传。支持 Anthropic 格式（Claude Code 等）和 OpenAI 格式（Hermes 等）客户端同时接入。
 
 ```
 Claude Code  ─(sk-cc-xxx, anthropic)──▶
@@ -17,14 +17,15 @@ Hermes       ─(sk-hermes-yyy, openai)─▶  vision(可选) ──▶ litellm 
 - 想用**便宜的 coding plan**（纯文本端点），但它**不支持图片**。
 - 又想要 **Admin UI 看用量、管 key、配多 provider**。
 - 多个客户端（Claude Code、Hermes…）共用一个网关，但**用量要按客户端分开统计**。
-- vision 插件把图片先转成文字描述，再喂给纯文本端点 —— 报错截图 / UI 稿 / 流程图这类足够用。
+- 客户端**固定指向一个地址**，切后端 profile 不用改 base_url；vision 按 profile 自动决定图片转文字还是原图透传。
 
-## 两种用法
+## 用法
 
-| 模式 | 启动命令 | 客户端 BASE_URL |
-|---|---|---|
-| 仅核心网关 | `docker compose up -d` | `http://127.0.0.1:4000` |
-| 核心 + 视觉插件 | `docker compose --profile vision up -d` | `http://127.0.0.1:4001` |
+| 启动命令 | 客户端 BASE_URL |
+|---|---|
+| `docker compose up -d` | `http://127.0.0.1:4001`（Anthropic）/ `http://127.0.0.1:4001/v1`（OpenAI） |
+
+> 4000 是 litellm 直连（调试/Admin UI 用），日常客户端走 4001。
 
 ## 快速开始
 
@@ -37,8 +38,8 @@ cp .env.example .env
 
 ./profiles.sh switch ark    # 生成 litellm/config.yaml（默认 ark；可换 ./profiles.sh switch zai）
 
-# 起核心 + 视觉插件
-docker compose --profile vision up -d
+# 启动（litellm + postgres + vision 一起起）
+docker compose up -d
 # 等 ~40s（postgres 初始化 + litellm 迁移）
 ```
 
@@ -57,7 +58,7 @@ curl -s -o /dev/null -w "vision:  HTTP %{http_code}\n" http://127.0.0.1:4001/v1/
 ```jsonc
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:4001",   // 带视觉用 4001；仅核心用 4000
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:4001",   // 固定 4001，切 profile 不用换
     "ANTHROPIC_AUTH_TOKEN": "<填 .env 里的 ARK_API_KEY>",  // = litellm master_key
     "ANTHROPIC_MODEL": "glm-5.2",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5.2",
@@ -98,7 +99,7 @@ model_list:
 ./profiles.sh delete <name>         # 删除 profile（当前在用的不让删）
 ```
 
-切换后按提示调整：ark 用 `--profile vision` + BASE_URL `:4001`；zai 不带 vision + BASE_URL `:4000`。
+切换后客户端 BASE_URL 不变（始终 4001）；vision 会按 profile 的 `native_vision` 标记自动决定图片转文字（ark）还是原图透传（zai/claude）。
 
 > 想加自己的 profile？两种方式：
 >
@@ -116,16 +117,21 @@ VISION_BASE_URL=https://api.openai.com/v1
 VISION_MODEL=gpt-4o
 ```
 
-## vision 插件做了什么
+## vision 层做了什么
 
-转发到 litellm 之前，对请求体做归一化（同时支持两种格式）：
+常驻在客户端与 litellm 之间，每次请求读 `config.yaml` 头部的 `# native_vision:` 标记决定图片处理：
 
-- **Anthropic `/v1/messages`**：`{type:image, source}` → 转文字；`thinking`/`server_tool_use` 及配对 `tool_result` → 剥离
-- **OpenAI `/v1/chat/completions`**：`{type:image_url, image_url:{url}}` → 转文字（支持 data:base64 和 http(s) URL）
+- **`native_vision: false`（如 ark）**：后端纯文本 -> 用视觉模型把图片块转成文字描述
+- **`native_vision: true`（如 zai/claude）**：后端原生多模态 -> 图片块原图透传，不转文字
 
-图片按内容 sha256 / URL 缓存，不重复调用视觉模型。SSE 流式响应、`tool_use` 原样透传。
+同时做协议归一化（与视觉无关，所有 profile 都执行）：
 
-> 取舍：纯文本端点拿到的是「图片的文字描述」而非像素。看截图/稿/图够用；精确到像素的判断会失真。
+- **Anthropic `/v1/messages`**：`thinking`/`server_tool_use` 及配对 `tool_result` -> 剥离（纯文本端点不认）
+- **OpenAI `/v1/chat/completions`**：`image_url` 支持 data:base64 和 http(s) URL
+
+转文字模式下，图片按内容 sha256 / URL 缓存，不重复调用视觉模型。SSE 流式响应、`tool_use` 原样透传。
+
+> 取舍：`native_vision: false` 时后端拿到的是「图片的文字描述」而非像素。看截图/稿/图够用；精确到像素的判断会失真。`true` 时无此损失。
 
 ## 多客户端 + 用量分开统计（虚拟 key）
 
@@ -147,7 +153,7 @@ curl -X POST http://127.0.0.1:4000/key/generate \
 
 > key 只在创建时返回一次明文，务必保存。也可在 Admin UI → API Key Users / Keys 页面图形化创建。
 
-客户端配置（**用各自的 key，指向 4001 走视觉，或 4000 走纯核心**）：
+客户端配置（**用各自的 key，统一指向 4001**）：
 
 ```jsonc
 // Claude Code (~/.claude/settings.json)
@@ -167,13 +173,13 @@ curl -X POST http://127.0.0.1:4000/key/generate \
 - **Admin UI 打不开 / 502**：本机有全局代理（Clash 等）把 localhost 也代理了。在代理规则放行 `127.0.0.1`/`localhost`，或临时关代理。
 - **`No connected db`**：postgres 没起来或没 healthy。`docker compose ps` 看 db 状态。
 - **端口 4000/4001 连不上（Colima）**：Colima 的端口转发偶尔抽风，`colima restart` 即可重建。
-- **ark 报 `Model only support text input`**：说明 vision 没生效（请求没走 4001），或图片块没被转换。看 vision 容器日志 `docker compose logs vision`。
+- **ark 报 `Model only support text input`**：说明图片没被转换。检查 profile 是否标了 `# native_vision: false`，以及 vision 容器日志 `docker compose logs vision`（应看到"转文字"）。
 
 ## 架构 / 文件
 
 ```
 litellm-multi-gateway/
-├─ docker-compose.yml     # litellm + db 核心；vision 为 profile 插件
+├─ docker-compose.yml     # litellm + db + vision（vision 常驻）
 ├─ litellm/config.yaml    # provider 配置（模板，换这里）
 ├─ litellm/profiles/      # 预制 provider 配置（ark/zai/…），profiles.sh 切换
 ├─ profiles.sh            # 管理 profile（new/switch/list/delete）

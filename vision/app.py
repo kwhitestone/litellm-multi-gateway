@@ -1,14 +1,17 @@
 """
-vision 插件：让「只支持文本」的 coding 端点也能处理图片。
+vision 前置层：常驻在客户端与 LiteLLM 之间，按当前 profile 决定图片处理方式。
 
-作为 LiteLLM 网关的可选前置层（docker compose --profile vision 启用）：
-  Claude Code -> vision(:4001) -> litellm(:4000) -> 你的 provider(如 ark)
+  Claude Code -> vision(:4001) -> litellm(:4000) -> 你的 provider(ark/zai/claude/…)
 
 做的事：
-  - 把 Anthropic /v1/messages 请求里的 {type:image} 块，用视觉模型转成文字描述
+  - 读 config.yaml 头部的 `# native_vision:` 标记，决定图片处理方式：
+      true  (zai/claude 等原生多模态后端) -> 原图透传，不转文字
+      false (ark 等纯文本后端)            -> 用视觉模型把图片转成文字描述
   - 归一化纯文本端点不认的块：thinking / redacted_thinking / server_tool_use 及其配对 tool_result
+    （这部分与视觉无关，所有 profile 都做）
   - 其余原样转发到 LiteLLM，SSE 流式响应原样回传（tool_use 等不受影响）
 
+客户端固定指向 :4001，切 profile 时 vision 读最新的 config.yaml，无需重启即可切换行为。
 视觉模型可换（默认智谱 glm-4.6v），改 VISION_BASE_URL / VISION_MODEL 即可（OpenAI 兼容接口都行）。
 """
 
@@ -53,6 +56,30 @@ REQ_HOP = {"host", "content-length", "transfer-encoding", "connection", "keep-al
 RESP_HOP = {"content-length", "transfer-encoding", "connection"}
 
 _cache: dict[str, str] = {}
+
+
+# ---------- 当前后端是否原生支持视觉 ----------
+# 读 litellm 挂载进来的 config.yaml（由 profiles.sh switch 生成）头部注释
+#   # native_vision: true   -> 后端能看图，图片原图透传
+#   # native_vision: false  -> 纯文本后端，图片转文字（默认，向后兼容）
+# 每次请求重读，支持切 profile 后无需重启 vision 即时生效。
+CONFIG_PATH = os.environ.get("LITELLM_CONFIG_PATH", "/app/config.yaml")
+
+
+def _native_vision() -> bool:
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line.startswith("#"):
+                    break  # 注释段结束（遇到 --- 或 yaml 正文）
+                if "native_vision:" in line:
+                    return line.split("native_vision:", 1)[1].strip().lower().startswith("true")
+    except FileNotFoundError:
+        _log(f"config.yaml 未找到({CONFIG_PATH})，native_vision 默认 false")
+    except Exception as exc:
+        _log(f"读 native_vision 失败，默认 false: {exc!r}")
+    return False
 
 
 # ---------- 图片 -> 文字 ----------
@@ -153,14 +180,20 @@ async def _walk(blocks: list, ctx: dict) -> list:
         btype = block.get("type")
         # Anthropic 格式: {type:"image", source:{...}}
         if btype == "image" and ctx["n_img"] < MAX_IMAGES:
-            desc = await _describe(block)
             ctx["n_img"] += 1
-            out.append({"type": "text", "text": f"[image, described by {VISION_MODEL}]\n{desc}"})
+            if ctx["native_vision"]:
+                out.append(block)  # 后端原生支持视觉 -> 原图透传
+            else:
+                desc = await _describe(block)
+                out.append({"type": "text", "text": f"[image, described by {VISION_MODEL}]\n{desc}"})
         # OpenAI 格式: {type:"image_url", image_url:{url:"data:..." 或 "https://..."}}
         elif btype == "image_url" and ctx["n_img"] < MAX_IMAGES:
-            desc = await _describe_openai(block)
             ctx["n_img"] += 1
-            out.append({"type": "text", "text": f"[image, described by {VISION_MODEL}]\n{desc}"})
+            if ctx["native_vision"]:
+                out.append(block)  # 后端原生支持视觉 -> 原图透传
+            else:
+                desc = await _describe_openai(block)
+                out.append({"type": "text", "text": f"[image, described by {VISION_MODEL}]\n{desc}"})
         elif btype in ("thinking", "redacted_thinking"):
             ctx["n_drop"] += 1  # 纯文本端点不接受推理块作为输入
         elif btype == "server_tool_use":
@@ -188,7 +221,7 @@ async def _transform(data: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(b, dict) and b.get("type") == "server_tool_use" and b.get("id"):
                     server_ids.add(b["id"])
 
-    ctx = {"n_img": 0, "n_drop": 0, "server_ids": server_ids}
+    ctx = {"n_img": 0, "n_drop": 0, "server_ids": server_ids, "native_vision": _native_vision()}
     for m in msgs:
         if isinstance(m, dict) and isinstance(m.get("content"), list):
             m["content"] = await _walk(m["content"], ctx)
@@ -198,7 +231,8 @@ async def _transform(data: dict[str, Any]) -> dict[str, Any]:
     if isinstance(sysv, list):
         data["system"] = await _walk(sysv, ctx)
 
-    _log(f"图片替换 {ctx['n_img']} 张；剥离 {ctx['n_drop']} 个非文本块"
+    mode = "原图透传" if ctx["native_vision"] else "转文字"
+    _log(f"图片 {ctx['n_img']} 张（{mode}）；剥离 {ctx['n_drop']} 个非文本块"
          f"(thinking/server_tool_use/server_tool_result)")
     return data
 

@@ -1,5 +1,6 @@
 # profile: claude
 # desc: 公司的 Claude Code
+# native_vision: true    # 后端原生支持图 -> vision 原图透传, 不转文字
 #
 # 切换后建议:
 #   docker compose up -d   (不带 --profile vision)

@@ -1,5 +1,6 @@
 # profile: ark
 # desc: 火山方舟 coding plan (纯文本端点, 需配 vision 插件看图)
+# native_vision: false   # 后端不支持图 -> vision 把图片转成文字描述
 #
 # 切换后建议:
 #   docker compose --profile vision up -d
