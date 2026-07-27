@@ -18,7 +18,7 @@ model_list:
     litellm_params: { model: anthropic/glm-5.2, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
   - model_name: claude-opus-4-8
     litellm_params: { model: anthropic/glm-5.2, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
-  - model_name: claude-haiku-4-5-20251001
+  - model_name: claude-opus-5
     litellm_params: { model: anthropic/glm-5.2, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
   - model_name: claude-fable-5
     litellm_params: { model: anthropic/glm-5.2, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
