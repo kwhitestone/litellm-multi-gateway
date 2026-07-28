@@ -82,6 +82,24 @@ def _native_vision() -> bool:
     return False
 
 
+# ---------- 归一化 cache_control 的 TTL ----------
+# Anthropic 规则：1h TTL 块必须在所有 5m 块之前（跨 tools->system->messages 整体顺序）。
+# 客户端(Claude Code/桌面端)有时混用 5m/1h 且顺序违规，导致后端 400:
+#   "a ttl='1h' cache_control block must not come after a ttl='5m' cache_control block"
+# 解法：把所有 cache_control 的 ttl 字段剥掉，统一降级成默认 5m ephemeral。
+# 缓存仍生效（只是 1h -> 5m），消除顺序冲突。
+def _strip_cache_ttl(obj: Any) -> None:
+    if isinstance(obj, dict):
+        cc = obj.get("cache_control")
+        if isinstance(cc, dict) and "ttl" in cc:
+            cc.pop("ttl", None)
+        for v in obj.values():
+            _strip_cache_ttl(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _strip_cache_ttl(item)
+
+
 # ---------- 图片 -> 文字 ----------
 
 async def _describe(block: dict) -> str:
@@ -210,6 +228,9 @@ async def _walk(blocks: list, ctx: dict) -> list:
 
 
 async def _transform(data: dict[str, Any]) -> dict[str, Any]:
+    # 归一化 cache_control TTL：剥掉所有 ttl 字段，避免客户端 1h/5m 顺序违规被后端拒
+    _strip_cache_ttl(data)
+
     msgs = data.get("messages")
     if not isinstance(msgs, list):
         return data
