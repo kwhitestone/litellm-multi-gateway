@@ -14,6 +14,8 @@ model_list:
       api_key: os.environ/ARK_API_KEY
 
   # Claude Code 默认模型名 → 全部别名到 glm-5.2（不配 *_MODEL 时靠这些接住）
+  - model_name: claude-haiku-4-5-20251001
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://aicoding-gateway.ndaeweb.com:8443, api_key: os.environ/CLAUDE_CODE_KEY }
   - model_name: claude-sonnet-5
     litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
   - model_name: claude-opus-4-8
