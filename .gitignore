@@ -3,9 +3,6 @@
 .env.*
 !.env.example
 
-# litellm 运行时配置（由 switch.sh 从 profiles/ 生成，不进 git）
-litellm/config.yaml
-
 # Python
 __pycache__/
 *.py[cod]
