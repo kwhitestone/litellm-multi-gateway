@@ -162,12 +162,10 @@ curl -X POST http://127.0.0.1:4001/key/generate \
 
 ```
 litellm-multi-gateway/
-├─ docker-compose.yml     # litellm + db + vision（vision 常驻）
-├─ litellm/config.yaml    # provider 配置（模板，换这里）
-├─ litellm/profiles/      # 预制 provider 配置（ark/zai/…），profiles.sh 切换
-├─ profiles.sh            # 管理 profile（new/switch/list/delete）
-├─ keys.sh                # 管理客户端虚拟 key（创建/列表/删除）
-├─ litellm/hooks/        # vision_hook 等 CustomLogger（litellm callbacks 加载）
+├─ docker-compose.yml           # litellm + db（vision 是 litellm 内 hook，无独立容器）
+├─ litellm/profiles/multi.yaml  # litellm config（ark/claude/zai 多后端共存，直接挂载）
+├─ litellm/hooks/vision_hook.py # vision hook（按模型 needs_vision 转图/透传）
+├─ keys.sh                      # 管理客户端虚拟 key（new/update/list/delete）
 ├─ .env.example
 └─ README.md
 ```
