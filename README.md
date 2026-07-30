@@ -73,11 +73,9 @@ curl -s -o /dev/null -w "litellm: HTTP %{http_code}\n" http://127.0.0.1:4001/hea
 
 ### 后端配置
 
-`litellm/profiles/multi.yaml` 是 litellm 的运行 config（docker-compose 直接挂载，无需 switch），把 ark/claude/zai 三个后端**同时加载**。改后端（api_base/key/模型）直接编辑它，然后 `docker compose restart litellm`。
+`litellm/profiles/multi.yaml` 是 litellm 的运行 config（docker-compose 直接挂载，无需 switch），把 ark/claude/zai 三个后端**同时加载**。改后端（api_base/key/模型）直接编辑它，然后 `docker compose restart litellm`。每个模型带 `# needs_vision:` 标记，vision hook 据此决定转图（ark/zai 的 glm-5.2）或原图透传（claude）。
 
-`ark.yaml`/`zai.yaml`/`claude.yaml` 是各后端的独立配置定义（参考用）；`./profiles.sh new <name>` 可生成新后端配置，再手动合并进 multi.yaml。每个模型带 `# needs_vision:` 标记，vision hook 据此决定转图（ark）或原图透传（claude/zai）。
-
-### 换视觉模型（默认智谱 glm-4.6v）
+### 换视觉模型（默认智谱 glm-5v-turbo）
 
 `.env` 里改（任何 OpenAI 兼容的视觉模型都行）：
 ```
