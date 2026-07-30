@@ -93,11 +93,16 @@ VISION_MODEL=gpt-4o
 ```bash
 docker compose up -d              # litellm 直接挂 multi.yaml（ark/claude/zai 三后端共存）
 
-# 给 key 配后端（cc 默认名会 alias 到指定后端，Claude Code 不改配置即可走）
+# 给 key 配后端（7 个 claude 名 alias 到指定后端，Claude Code 不改配置即可走）
 ./keys.sh new cc --backend ark          # 这个 key 走 ark
 ./keys.sh new col --backend claude      # 这个 key 走 claude
 ./keys.sh new me --backend ark,claude   # 多后端 key：发 model=ark 或 model=claude 选后端
+
+# 动态改某个 key 的路由（不重启 litellm，秒级生效）
+./keys.sh update <key明文|hash|前缀> --backend zai   # 把该 key 从 ark 切到 zai
 ```
+
+客户端始终发固定 7 个 claude 名（`claude-sonnet-5` 等），由 key 的 aliases 决定落到哪个后端。换后端用 `update` 即可，不用动客户端配置，也不用重启 litellm。
 
 后端模型命名：`ark-glm-5.2` / `claude-sonnet-5`（claude 用真名，cc 默认名直接命中）/ `zai-glm-4.7`。
 
