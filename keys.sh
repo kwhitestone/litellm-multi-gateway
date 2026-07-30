@@ -63,15 +63,24 @@ list_keys() {
   if [ -z "$hashes" ]; then echo "(还没有 key，或 litellm 没起)"; return; fi
   n=$(echo "$hashes" | grep -c .)
   echo "key 列表（共 $n 个，delete 用完整 hash）："
-  printf "  %-18s %-12s %s\n" "alias" "user" "hash"
-  echo "  ────────────────── ──────────── ────────────────────────────────────"
+  printf "  %-18s %-12s %-12s %s\n" "alias" "user" "后端" "hash"
+  echo "  ────────────────── ──────────── ───────────── ────────────────────────────────────"
   for h in $hashes; do
     cg "$BASE/key/info?key=$h" -H "Authorization: Bearer $MASTER" \
       | python3 -c "
 import json,sys
 try: d=json.load(sys.stdin); info=d.get('info',{})
 except Exception: info={}
-print('  %-18s %-12s %s' % (str(info.get('key_alias') or '-')[:18], str(info.get('user_id') or '-')[:12], sys.argv[1]))
+al=info.get('aliases') or {}
+bks=set()
+for k,v in al.items():
+    if k in ('ark','claude','zai'): bks.add(k)       # 多后端短名
+    v=str(v)
+    if v.startswith('ark-'): bks.add('ark')
+    elif v.startswith('zai-'): bks.add('zai')
+    elif v.startswith('claude'): bks.add('claude')
+backend=','.join(sorted(bks)) if bks else '?'
+print('  %-18s %-12s %-12s %s' % (str(info.get('key_alias') or '-')[:18], str(info.get('user_id') or '-')[:12], backend[:12], sys.argv[1]))
 " "$h"
   done
 }
