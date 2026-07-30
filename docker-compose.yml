@@ -1,16 +1,16 @@
 # litellm-multi-gateway
 # 以 LiteLLM 为底层的 Claude Code 网关。核心 = litellm + postgres；
-# vision 常驻在客户端与 litellm 之间，按 profile 的 native_vision 标记决定转图/透传。
+# vision 作为 litellm 的 CustomLogger hook（litellm/hooks/vision_hook.py）运行在进程内，
+# 按模型 needs_vision 标记决定转图/透传。不再需要独立 vision 容器。
 #
 # 启动：        docker compose up -d
 # 停止：        docker compose down
 #
 # 客户端统一指向（BASE_URL）：
-#   Anthropic(Claude Code) http://127.0.0.1:4001   （经 vision）
+#   Anthropic(Claude Code) http://127.0.0.1:4001
 #   OpenAI(Hermes 等)      http://127.0.0.1:4001/v1
-#   直连 litellm(调试用)   http://127.0.0.1:4000
 #
-# Admin UI： http://127.0.0.1:4000/ui   （登录见 .env 的 UI_USERNAME/UI_PASSWORD 或用 master key）
+# Admin UI： http://127.0.0.1:4001/ui   （登录见 .env 的 UI_USERNAME/UI_PASSWORD 或用 master key）
 
 services:
   db:
@@ -34,37 +34,20 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    env_file: .env   # 整体载入 .env：所有 *_KEY（ARK/Z_AI/CLAUDE_CODE/…）自动透传，新增 provider key 无需改这里
+    env_file: .env   # 整体载入 .env：所有 *_KEY（ARK/Z_AI/CLAUDE_CODE/…）+ VISION_* 自动透传
     environment:
       UI_USERNAME: ${UI_USERNAME:-admin}
       UI_PASSWORD: ${UI_PASSWORD:-admin}
       STORE_MODEL_IN_DB: "True"
-      # provider key 由 env_file 注入（ARK_API_KEY / Z_AI_API_KEY / CLAUDE_CODE_KEY / …），
-      # profile 里 os.environ/<NAME> 即可读取；vision 插件也复用 ARK_API_KEY 鉴权
+      PYTHONPATH: /app/hooks   # 让 litellm 能 import hooks 下的自定义模块（vision_hook 等）
+      # provider key + VISION_API_KEY/BASE_URL/MODEL 由 env_file 注入；
+      # vision_hook 读这些 env 决定视觉模型（默认智谱 glm-4.6v，回退 Z_AI_API_KEY）
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
-    command: --config /app/config.yaml --port 4000 --num_workers 2
+      - ./litellm/hooks:/app/hooks:ro   # vision_hook 等 CustomLogger（config callbacks 加载）
+    command: --config /app/config.yaml --port 4001 --num_workers 2
     ports:
-      - "127.0.0.1:4000:4000"   # Admin UI + 直连入口
-    restart: unless-stopped
-
-  # ===== vision 前置层（常驻）：按 profile 的 native_vision 标记决定转图/透传 =====
-  vision:
-    build: ./vision
-    depends_on:
-      - litellm
-    env_file: .env   # 同步载入 .env，复用其中的 VISION_* / Z_AI_API_KEY 等
-    environment:
-      DOWNSTREAM_URL: http://litellm:4000          # 容器内用服务名
-      DOWNSTREAM_KEY: ${ARK_API_KEY}               # = litellm master_key，打通鉴权
-      # 视觉模型（默认智谱 glm-4.6v，仅 native_vision=false 的 profile 会用到）
-      VISION_API_KEY: ${VISION_API_KEY:-${Z_AI_API_KEY}}
-      VISION_BASE_URL: ${VISION_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
-      VISION_MODEL: ${VISION_MODEL:-glm-4.6v}
-    volumes:
-      - ./litellm/config.yaml:/app/config.yaml:ro   # 读取当前 profile 的 native_vision 标记
-    ports:
-      - "127.0.0.1:4001:4001"   # 客户端入口（统一用这个，切 profile 不用换 base_url）
+      - "127.0.0.1:4001:4001"   # 客户端入口 + Admin UI
     restart: unless-stopped
 
 volumes:

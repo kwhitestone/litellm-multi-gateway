@@ -22,6 +22,7 @@ model_list:
     litellm_params: { model: anthropic/claude-fable-5, api_base: https://aicoding-gateway.ndaeweb.com:8443, api_key: os.environ/CLAUDE_CODE_KEY }
 
 litellm_settings:
+  callbacks: [hooks.vision_hook.VisionPreRequestHook]   # vision 移入 litellm：按模型 needs_vision 转图/透传
   drop_params: false   # 原样转发 thinking + output_config 等给后端，避免 effort=xhigh 时 thinking 被丢导致 400
   request_timeout: 600
   num_retries: 2
