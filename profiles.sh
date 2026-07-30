@@ -1,24 +1,23 @@
 #!/usr/bin/env bash
-# profiles.sh - 管理 LiteLLM provider profile（新建 / 切换 / 列出 / 删除）。
+# profiles.sh - 管理后端配置文件（new / list / delete）。
 #
-#   ./profiles.sh                      列出可选 profile + 当前在用哪个
-#   ./profiles.sh new <name> [opts]    生成新 profile（交互式或带参数免交互）
-#   ./profiles.sh switch <name>        切换后端 + 重启 litellm
-#   ./profiles.sh delete <name>        删除 profile（当前在用的不让删）
+#   ./profiles.sh                      列出后端配置 + 当前运行的（multi）
+#   ./profiles.sh new <name> [opts]    生成新后端配置（交互式或带参数）
+#   ./profiles.sh delete <name>        删除后端配置
 #
-# profile 文件在 litellm/profiles/*.yaml，switch 实际是把目标文件拷到
-# litellm/config.yaml（compose 挂载这个），所以 config.yaml 不进 git。
+# litellm 直接挂载 litellm/profiles/multi.yaml 作 config（多后端共存，无需 switch）。
+# ark/zai/claude.yaml 是各后端的配置定义；new 生成的新后端需手动合并进 multi.yaml。
 set -euo pipefail
 cd "$(dirname "$0")"
 
 PROFILES="litellm/profiles"
-ACTIVE="litellm/config.yaml"
-BASE="http://127.0.0.1:4000"
+ACTIVE="litellm/profiles/multi.yaml"
+BASE="http://127.0.0.1:4001"
 
 # ---------- 公共：当前 profile ----------
 current() {
   if [ ! -f "$ACTIVE" ]; then
-    echo "(未生成 - 先运行: ./profiles.sh switch <name>)"
+    echo "(multi.yaml 不存在)"
     return
   fi
   grep -m1 '^# profile:' "$ACTIVE" 2>/dev/null | sed 's/^# profile: //' || echo "(未知)"
@@ -35,46 +34,7 @@ cmd_list() {
     printf "   %-12s %s\n" "$name" "${desc:-}"
   done
   echo
-  echo "用法: $0 <new|switch|delete> [args]  （无参数 = list）"
-}
-
-# ---------- 子命令：switch ----------
-cmd_switch() {
-  local name="${1:-multi}"   # multi 是唯一常驻 profile（多后端共存）
-  local target="$PROFILES/$name.yaml"
-  if [ ! -f "$target" ]; then
-    echo "错误: 没有 profile '$name'" >&2; echo >&2
-    cmd_list >&2; exit 1
-  fi
-
-  cp "$target" "$ACTIVE"
-  echo "✓ 已切换到: $name"
-
-  if docker compose ps litellm >/dev/null 2>&1 && [ -n "$(docker compose ps -q litellm 2>/dev/null)" ]; then
-    echo "  重启 litellm..."
-    docker compose restart litellm
-    echo "  等 25s 让 litellm 重新就绪..."
-    sleep 25
-  else
-    echo "  (litellm 容器未运行，跳过重启。下次 docker compose up 时自动用新配置)"
-  fi
-
-  echo
-  echo "当前后端: $(current)"
-  # 读 native_vision 标记展示（vision 据此决定转图/透传）
-  local nv
-  nv=$(grep -m1 '^# native_vision:' "$target" 2>/dev/null | sed 's/^# native_vision:[[:space:]]*//') || true
-  case "$nv" in
-    true*)  echo "  图片处理: 原图透传（后端原生多模态）" ;;
-    false*) echo "  图片处理: 转文字描述（纯文本后端）" ;;
-    *)      echo "  图片处理: 转文字描述（未标记，默认）" ;;
-  esac
-  echo
-  echo "提示："
-  echo "  客户端 BASE_URL 固定 http://127.0.0.1:4001（切 profile 不用换）"
-  if ! docker compose ps vision >/dev/null 2>&1 || [ -z "$(docker compose ps -q vision 2>/dev/null)" ]; then
-    echo "  vision 未运行 -> docker compose up -d"
-  fi
+  echo "用法: $0 <new|delete> [args]  （无参数 = list）"
 }
 
 # ---------- 子命令：delete ----------
@@ -84,9 +44,9 @@ cmd_delete() {
   if [ ! -f "$target" ]; then
     echo "错误: 没有 profile '$name'" >&2; exit 1
   fi
-  # 不让删当前在用的（config.yaml 指向它），避免运行时配置悬空
-  if [ "$(current)" = "$name" ]; then
-    echo "错误: '$name' 是当前在用的 profile，先 switch 到别的再删" >&2; exit 1
+  # multi.yaml 是 litellm 的运行 config，不让删
+  if [ "$name" = "multi" ]; then
+    echo "错误: multi.yaml 是运行配置（litellm 直接挂载），不能删" >&2; exit 1
   fi
   read -rp "删除 $target ? [y/N] " ans
   case "$ans" in y|Y) ;; *) echo "取消"; exit 0 ;; esac
@@ -201,8 +161,8 @@ cmd_new() {
   echo
   echo "下一步:"
   echo "  1. 确认 .env 里有 ${keyenv}=<你的key>"
-  echo "  2. ./profiles.sh switch ${name}      # 切换 + 重启 litellm"
-  echo "  3. docker compose up -d              #（若还没起容器）"
+  echo "  2. 把该后端合并进 litellm/profiles/multi.yaml（multi 才会被 litellm 加载）"
+  echo "  3. docker compose restart litellm   # 重载 multi.yaml"
   echo "  4. 客户端 BASE_URL = http://127.0.0.1:4001"
 }
 
@@ -210,7 +170,6 @@ cmd_new() {
 case "${1:-list}" in
   ""|list|-h|--help) cmd_list ;;
   new)    shift; cmd_new "$@" ;;
-  switch) shift; cmd_switch "$@" ;;
   delete) shift; cmd_delete "$@" ;;
-  *) echo "未知命令: $1" >&2; echo "用法: $0 <new|switch|delete> [args]" >&2; exit 1 ;;
+  *) echo "未知命令: $1" >&2; echo "用法: $0 <new|delete> [args]" >&2; exit 1 ;;
 esac

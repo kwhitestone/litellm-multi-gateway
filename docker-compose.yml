@@ -43,7 +43,7 @@ services:
       # provider key + VISION_API_KEY/BASE_URL/MODEL 由 env_file 注入；
       # vision_hook 读这些 env 决定视觉模型（默认智谱 glm-4.6v，回退 Z_AI_API_KEY）
     volumes:
-      - ./litellm/config.yaml:/app/config.yaml:ro
+      - ./litellm/profiles/multi.yaml:/app/config.yaml:ro   # multi 直接作 config（多后端共存，无需 switch）
       - ./litellm/hooks:/app/hooks:ro   # vision_hook 等 CustomLogger（config callbacks 加载）
     command: --config /app/config.yaml --port 4001 --num_workers 2
     ports:
