@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Claude Code 会话/计划（本地产物，不进 git）
+.claude/
+
 # Python
 __pycache__/
 *.py[cod]
