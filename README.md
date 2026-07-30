@@ -32,79 +32,50 @@ Hermes       ─(sk-hermes-yyy, openai)─▶┤  ├─ router → provider(ark
 ```bash
 git clone <repo> litellm-multi-gateway && cd litellm-multi-gateway
 cp .env.example .env
-# 编辑 .env：填 ARK_API_KEY（你的 coding provider token）和 Z_AI_API_KEY（视觉模型 key）
+# 编辑 .env：填三个后端的 key —— ARK_API_KEY（兼作 master key）、CLAUDE_CODE_KEY、Z_AI_API_KEY
 
-./profiles.sh switch ark    # 生成 litellm/config.yaml（默认 ark；可换 ./profiles.sh switch zai）
+./profiles.sh switch            # 生成 litellm/config.yaml（multi：多后端共存）
 
-# 启动（litellm + postgres + vision 一起起）
-docker compose up -d
+docker compose up -d            # 起 litellm + postgres（vision 是 litellm 内的 hook，无独立容器）
 # 等 ~40s（postgres 初始化 + litellm 迁移）
 ```
 
 验证：
 ```bash
-curl -s -o /dev/null -w "litellm: HTTP %{http_code}\n" http://127.0.0.1:4000/health/liveness   # 200
-curl -s -o /dev/null -w "vision:  HTTP %{http_code}\n" http://127.0.0.1:4001/v1/messages -X POST # 400(缺body)=服务在
+curl -s -o /dev/null -w "litellm: HTTP %{http_code}\n" http://127.0.0.1:4001/health/liveness   # 200
 ```
 
-浏览器打开 **http://127.0.0.1:4000/ui** 看 Admin UI（登录见 `.env` 的 `UI_USERNAME/UI_PASSWORD`，或直接用 master key = `ARK_API_KEY`）。
+浏览器打开 **http://127.0.0.1:4001/ui** 看 Admin UI（登录用 `.env` 的 `UI_USERNAME/UI_PASSWORD`，或 master key = `ARK_API_KEY`）。
 
 ## Claude Code 接入
 
-编辑 `~/.claude/settings.json`（或你的配置 profile）：
+先建一个虚拟 key（**不要用 master key**）：
+
+```bash
+./keys.sh new cc --backend claude   # 这个 key 走 claude 后端（公司网关）
+# 或 --backend ark / zai / ark,claude（逗号多选）
+```
+
+把返回的 key 填进 `~/.claude/settings.json`：
 
 ```jsonc
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:4001",   // 固定 4001，切 profile 不用换
-    "ANTHROPIC_AUTH_TOKEN": "<填 .env 里的 ARK_API_KEY>",  // = litellm master_key
-    "ANTHROPIC_MODEL": "glm-5.2",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5.2",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.2",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2"
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:4001",
+    "ANTHROPIC_AUTH_TOKEN": "<上一步返回的虚拟 key>"
   }
 }
 ```
 
-> `ANTHROPIC_AUTH_TOKEN` 必须等于 `ARK_API_KEY`（它就是 litellm 的 master_key），vision 插件转发时用它鉴权。
+**不用配 `*_MODEL`**：Claude Code 发的默认名 `claude-sonnet-5` 等，由虚拟 key 的 `aliases` 路由到 `--backend` 指定的后端。换后端只需换 key，或建多后端 key（`--backend ark,claude`，发 `model=ark`/`model=claude` 选）。
+
+> 客户端一律用 `keys.sh new` 创建的虚拟 key。不要填 `.env` 里的 `ARK_API_KEY`——那是 master key，仅用于网关管理，用了用量也无法按客户端分开。
 
 ## 配置说明
 
-### 换 provider（默认是 ark）
+### 后端（multi profile）
 
-编辑 `litellm/config.yaml` 的 `model_list`，把 `model` / `api_base` / `api_key` 换成你的 provider。示例（OpenAI 兼容端点）：
-
-```yaml
-model_list:
-  - model_name: glm-5.2
-    litellm_params:
-      model: openai/your-model          # 注意 provider 前缀决定格式
-      api_base: https://your-provider/v1
-      api_key: os.environ/ARK_API_KEY   # env 变量名可改
-```
-
-`model_name` 要和 Claude Code settings 里的 `*_MODEL` 一致。
-
-### 切换 / 管理 profile（一键切后端）
-
-`litellm/profiles/` 里预置了几套 provider 配置，用 `profiles.sh` 管理（自动重启 litellm）：
-
-```bash
-./profiles.sh                       # 看有哪些 profile + 当前在用哪个（无参数 = list）
-./profiles.sh switch ark            # 切到火山方舟 coding plan（纯文本，配 vision）
-./profiles.sh switch zai            # 切到智谱 BigModel（原生多模态，无需 vision）
-./profiles.sh new <name> [opts]     # 生成新 profile（交互式或带参数免交互）
-./profiles.sh delete <name>         # 删除 profile（当前在用的不让删）
-```
-
-切换后客户端 BASE_URL 不变（始终 4001）；vision 会按 profile 的 `native_vision` 标记自动决定图片转文字（ark）还是原图透传（zai/claude）。
-
-> 想加自己的 profile？两种方式：
->
-> - **脚本化（推荐）**：`./profiles.sh new myprofile`（交互式问答），或带参数免交互 `./profiles.sh new myprofile --model glm-4.7 --base https://... --key-env Z_AI_API_KEY --proto anthropic`。自动生成全套 Claude Code 别名，结构与 ark/zai 一致。
-> - **手动**：复制 `litellm/profiles/ark.yaml` 改一改，文件名就是 profile 名（`./profiles.sh switch 你的名`）。
-
-**关于模型名映射**：Claude Code 不配 `*_MODEL` 时会发默认的 Anthropic 模型名（`claude-sonnet-5` 等）。每个 profile 的 `model_list` 里把这些名字都列出来、指向你的实际模型，LiteLLM 就会自动转换——所以 Claude Code 配置可以极简（只留 BASE_URL + token），模型路由全由 LiteLLM 接管。
+`litellm/profiles/multi.yaml` 把 ark/claude/zai 三个后端**同时加载**在一个 config。加新后端、改 api_base/key 都编辑这个文件，改完 `./profiles.sh switch` 重新生成 config 并重启 litellm。每个模型带 `# needs_vision:` 标记，vision hook 据此决定转图（ark）或原图透传（claude/zai）。
 
 ### 换视觉模型（默认智谱 glm-4.6v）
 
@@ -151,12 +122,12 @@ vision 是 litellm 的 CustomLogger（`litellm/hooks/vision_hook.py`），在请
 MASTER=$(grep '^ARK_API_KEY=' .env | cut -d= -f2)
 
 # 给 Claude Code 建 key（绑 user=cc）
-curl -X POST http://127.0.0.1:4000/key/generate \
+curl -X POST http://127.0.0.1:4001/key/generate \
   -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
   -d '{"user_id":"cc","key_alias":"cc","models":["glm-5.2","claude-sonnet-5"]}'
 
 # 给 Hermes 建 key（绑 user=hermes）
-curl -X POST http://127.0.0.1:4000/key/generate \
+curl -X POST http://127.0.0.1:4001/key/generate \
   -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
   -d '{"user_id":"hermes","key_alias":"hermes","models":["glm-5.2","claude-sonnet-5"]}'
 ```

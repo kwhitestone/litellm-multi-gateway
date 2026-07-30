@@ -40,7 +40,7 @@ cmd_list() {
 
 # ---------- 子命令：switch ----------
 cmd_switch() {
-  local name="${1:?用法: $0 switch <name>}"
+  local name="${1:-multi}"   # multi 是唯一常驻 profile（多后端共存）
   local target="$PROFILES/$name.yaml"
   if [ ! -f "$target" ]; then
     echo "错误: 没有 profile '$name'" >&2; echo >&2
