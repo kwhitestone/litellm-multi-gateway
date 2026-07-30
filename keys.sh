@@ -4,10 +4,36 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 BASE="http://127.0.0.1:4001"   # litellm（vision 已移入 litellm，端口统一 4001）
-# 新 key 默认可用的模型（profile 里出现的别名 + 实际模型名）
-MODELS='["glm-5.2","claude-sonnet-5","claude-opus-4-8","claude-haiku-4-5-20251001"]'
 
 cg() { curl -s --noproxy '*' "$@"; }
+
+# 单后端 -> 7 个 claude 名路由 {aliases, models}（new 单后端 + update 共用）
+#   ark: 全->ark-glm-5.2   claude: identity(名即真名)   zai: 全->zai-glm-4.7
+cc_aliases() {
+  BACKEND="${1:?用法: cc_aliases <ark|claude|zai>}" python3 -c '
+import json,os,sys
+b=os.environ["BACKEND"]
+CC=["claude-haiku-4-5-20251001","claude-sonnet-4-6","claude-sonnet-5",
+    "claude-sonnet-4-8","claude-opus-4-8","claude-opus-5","claude-fable-5"]
+T={"ark":"ark-glm-5.2","claude":None,"zai":"zai-glm-4.7"}
+if b not in T: print("错误:未知后端 "+b,file=sys.stderr); sys.exit(1)
+t=T[b]
+print(json.dumps({"aliases":{c:(c if t is None else t) for c in CC},
+                  "models":sorted(set(CC)|({t} if t else set()))}))
+'
+}
+
+# 解析 key 输入：明文(sk-...)直接用；否则按 hash/前缀补全成完整 hash
+resolve_key() {
+  local q="$1"
+  [[ "$q" == sk-* ]] && { echo "$q"; return; }
+  cg "$BASE/key/list" -H "Authorization: Bearer $MASTER" | python3 -c "
+import json,sys
+d=json.load(sys.stdin); ks=d.get('keys',[]); q=sys.argv[1]
+hits=[k for k in ks if k==q or k.startswith(q)]
+print(hits[0] if hits else '')
+" "$q"
+}
 
 MASTER=$(grep -E '^ARK_API_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2-)
 [ -z "$MASTER" ] && { echo "错误：.env 里没有 ARK_API_KEY（master key）" >&2; exit 1; }
@@ -21,6 +47,7 @@ keys.sh - 管理客户端访问 key（绑 user，用量按 user 分开统计）
   ./keys.sh new <user> [alias] [--backend ark|claude|zai|逗号多选]
                  创建 key（默认后端 claude；--backend 决定该 key 走哪个后端）
   ./keys.sh list               列出所有 key（alias / user / hash）
+  ./keys.sh update <key> --backend ark|claude|zai   动态改该 key 的 7 名路由（不重启 litellm）
   ./keys.sh delete <hash>      删除 key（hash 从 list 拿，支持前缀匹配）
 
 例:
@@ -72,30 +99,34 @@ case "${1:-help}" in
       read -rp "后端（ark/claude/zai，逗号分隔多选）[claude]: " backend
       backend="${backend:-claude}"
     fi
-    body=$(BACKENDS="$backend" KEY_USER="$user" KEY_ALIAS="$alias" python3 -c '
-import json,sys,os
+    if [ "$(echo "$backend" | tr ',' '\n' | grep -c .)" -eq 1 ]; then
+      # 单后端：7 个 claude 名全路由到该后端（claude=identity）
+      am=$(cc_aliases "$backend") || exit 1
+      body=$(KEY_USER="$user" KEY_ALIAS="$alias" AM="$am" python3 -c '
+import json,os
+d=json.loads(os.environ["AM"]); d["user_id"]=os.environ["KEY_USER"]; d["key_alias"]=os.environ["KEY_ALIAS"]
+print(json.dumps(d))')
+    else
+      # 多后端：短名选后端 + 7 名默认指 claude-sonnet-5（若含 claude）
+      body=$(BACKENDS="$backend" KEY_USER="$user" KEY_ALIAS="$alias" python3 -c '
+import json,os,sys
 backends=[b.strip() for b in os.environ["BACKENDS"].split(",") if b.strip()]
-CC=["claude-sonnet-5","claude-sonnet-4-6","claude-opus-4-8","claude-opus-5","claude-haiku-4-5-20251001","claude-fable-5"]
-B={"ark":["ark-glm-5.2"], "claude":CC, "zai":["zai-glm-4.7"]}
+CC=["claude-haiku-4-5-20251001","claude-sonnet-4-6","claude-sonnet-5",
+    "claude-sonnet-4-8","claude-opus-4-8","claude-opus-5","claude-fable-5"]
+B={"ark":["ark-glm-5.2"],"claude":CC,"zai":["zai-glm-4.7"]}
 for b in backends:
     if b not in B: print("错误:未知后端 "+b,file=sys.stderr); sys.exit(1)
-models=set(); aliases={}
+short={"ark":"ark-glm-5.2","claude":"claude-sonnet-5","zai":"zai-glm-4.7"}
+aliases={b:short[b] for b in backends}
+ct="claude-sonnet-5" if "claude" in backends else short[backends[0]]
+for c in CC: aliases[c]=ct
+models=set(CC)
 for b in backends:
     for m in B[b]: models.add(m)
-if len(backends)==1:
-    b=backends[0]
-    if b!="claude":            # claude 后端的 model_name 就是 cc 默认名，无需 alias
-        t=B[b][0]
-        for c in CC: aliases[c]=t
-        models.update(CC)
-else:
-    short={"ark":"ark-glm-5.2","claude":"claude-sonnet-5","zai":"zai-glm-4.7"}
-    for b in backends: aliases[b]=short[b]
-    ct="claude-sonnet-5" if "claude" in backends else short[backends[0]]
-    for c in CC: aliases[c]=ct
-    models.update(CC)
-print(json.dumps({"user_id":os.environ["KEY_USER"],"key_alias":os.environ["KEY_ALIAS"],"models":sorted(models),"aliases":aliases}))
+print(json.dumps({"user_id":os.environ["KEY_USER"],"key_alias":os.environ["KEY_ALIAS"],
+                  "models":sorted(models),"aliases":aliases}))
 ')
+    fi
     [ -n "$body" ] || exit 1
     cg -X POST "$BASE/key/generate" \
       -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
@@ -152,6 +183,40 @@ if isinstance(d,dict) and 'error' in d:
     print('✗ 删除失败:', e.get('message') or e); sys.exit(1)
 print('✓ 删除成功:', d.get('message') or d.get('deleted_keys') or d)
 "
+    ;;
+  update)
+    shift
+    key=""; backend=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --backend) backend="$2"; shift 2 ;;
+        -h|--help) echo "用法: $0 update <key明文|hash|前缀> --backend ark|claude|zai  （动态改路由，不重启 litellm）"; exit 0 ;;
+        *) [ -z "$key" ] && key="$1"; shift ;;
+      esac
+    done
+    [ -n "$key" ] || { echo "用法: $0 update <key明文|hash|前缀> --backend ark|claude|zai"; exit 1; }
+    if [ -z "$backend" ]; then read -rp "新后端（ark/claude/zai）: " backend; fi
+    full=$(resolve_key "$key")
+    [ -n "$full" ] || { echo "错误: 无法解析 key '$key'（明文 sk- / hash / 前缀）" >&2; exit 1; }
+    [ "$full" != "$key" ] && echo "  匹配完整 hash: $full"
+    # 重建完整 aliases + models（整体覆盖，cc_aliases 保证 7 名齐全）
+    am=$(cc_aliases "$backend") || exit 1
+    body=$(KEY="$full" AM="$am" python3 -c '
+import json,os
+d=json.loads(os.environ["AM"]); d["key"]=os.environ["KEY"]
+print(json.dumps(d))')
+    cg -X POST "$BASE/key/update" \
+      -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
+      -d "$body" \
+      | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+if isinstance(d,dict) and "error" in d:
+    print("✗ 更新失败:", d["error"].get("message") or d["error"]); sys.exit(1)
+print("✓ 路由已切换 ->", sys.argv[1], "（下个请求即生效，无需重启）")
+for k,v in sorted((d.get("aliases") or {}).items()):
+    print("   ", k, "->", v)
+' "$backend"
     ;;
   *) echo "未知命令: $1" >&2; show_help >&2; exit 1 ;;
 esac
