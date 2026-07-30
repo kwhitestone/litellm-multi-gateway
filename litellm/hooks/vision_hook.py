@@ -27,10 +27,10 @@ def _log(msg: str) -> None:
     print(f"[vision_hook] {msg}", file=sys.stderr, flush=True)
 
 
-# 视觉模型（默认智谱 glm-4.6v，可换任何 OpenAI 兼容视觉模型）
+# 视觉模型（默认智谱 glm-5v-turbo，可换任何 OpenAI 兼容视觉模型）
 VISION_API_KEY = os.environ.get("VISION_API_KEY", "") or os.environ.get("Z_AI_API_KEY", "")
 VISION_BASE_URL = os.environ.get("VISION_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
-VISION_MODEL = os.environ.get("VISION_MODEL", "glm-4.6v")
+VISION_MODEL = os.environ.get("VISION_MODEL", "glm-5v-turbo")
 MAX_IMAGES = int(os.environ.get("VISION_MAX_IMAGES_PER_REQUEST", "20"))
 DESC_PROMPT = os.environ.get(
     "VISION_DESC_PROMPT",

@@ -29,9 +29,9 @@ model_list:
   - model_name: claude-fable-5   # needs_vision: false
     litellm_params: { model: anthropic/claude-fable-5, api_base: https://aicoding-gateway.ndaeweb.com:8443, api_key: os.environ/CLAUDE_CODE_KEY }
 
-  # ===== zai（智谱 BigModel，原生多模态，图片原图透传）=====
-  - model_name: zai-glm-4.7   # needs_vision: false
-    litellm_params: { model: anthropic/glm-4.7, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
+  # ===== zai（智谱 BigModel，glm-5.2 纯文本，图片需转文字）=====
+  - model_name: zai-glm-5.2   # needs_vision: true
+    litellm_params: { model: anthropic/glm-5.2, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
 
 litellm_settings:
   callbacks: [hooks.vision_hook.VisionPreRequestHook]   # vision 移入 litellm：按模型 needs_vision 转图/透传
