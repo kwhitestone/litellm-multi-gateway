@@ -34,9 +34,7 @@ git clone <repo> litellm-multi-gateway && cd litellm-multi-gateway
 cp .env.example .env
 # 编辑 .env：填三个后端的 key —— ARK_API_KEY（兼作 master key）、CLAUDE_CODE_KEY、Z_AI_API_KEY
 
-./profiles.sh switch            # 生成 litellm/config.yaml（multi：多后端共存）
-
-docker compose up -d            # 起 litellm + postgres（vision 是 litellm 内的 hook，无独立容器）
+docker compose up -d            # 起 litellm + postgres（litellm 直接挂载 multi.yaml，无需 switch）
 # 等 ~40s（postgres 初始化 + litellm 迁移）
 ```
 
@@ -73,9 +71,11 @@ curl -s -o /dev/null -w "litellm: HTTP %{http_code}\n" http://127.0.0.1:4001/hea
 
 ## 配置说明
 
-### 后端（multi profile）
+### 后端配置
 
-`litellm/profiles/multi.yaml` 把 ark/claude/zai 三个后端**同时加载**在一个 config。加新后端、改 api_base/key 都编辑这个文件，改完 `./profiles.sh switch` 重新生成 config 并重启 litellm。每个模型带 `# needs_vision:` 标记，vision hook 据此决定转图（ark）或原图透传（claude/zai）。
+`litellm/profiles/multi.yaml` 是 litellm 的运行 config（docker-compose 直接挂载，无需 switch），把 ark/claude/zai 三个后端**同时加载**。改后端（api_base/key/模型）直接编辑它，然后 `docker compose restart litellm`。
+
+`ark.yaml`/`zai.yaml`/`claude.yaml` 是各后端的独立配置定义（参考用）；`./profiles.sh new <name>` 可生成新后端配置，再手动合并进 multi.yaml。每个模型带 `# needs_vision:` 标记，vision hook 据此决定转图（ark）或原图透传（claude/zai）。
 
 ### 换视觉模型（默认智谱 glm-4.6v）
 
@@ -91,8 +91,7 @@ VISION_MODEL=gpt-4o
 `multi` profile 把 ark/claude/zai 三个后端**同时加载**在一个 config.yaml，不再 switch 切换。用虚拟 key 的 `aliases` 按后端路由：
 
 ```bash
-./profiles.sh switch multi        # 切到多后端模式
-docker compose up -d
+docker compose up -d              # litellm 直接挂 multi.yaml（ark/claude/zai 三后端共存）
 
 # 给 key 配后端（cc 默认名会 alias 到指定后端，Claude Code 不改配置即可走）
 ./keys.sh new cc --backend ark          # 这个 key 走 ark
@@ -100,7 +99,7 @@ docker compose up -d
 ./keys.sh new me --backend ark,claude   # 多后端 key：发 model=ark 或 model=claude 选后端
 ```
 
-后端模型命名：`ark-glm-5.2` / `claude-sonnet-5`（claude 用真名，cc 默认名直接命中）/ `zai-glm-4.7`。单后端 profile（ark/zai/claude）仍可用 `./profiles.sh switch <name>`。
+后端模型命名：`ark-glm-5.2` / `claude-sonnet-5`（claude 用真名，cc 默认名直接命中）/ `zai-glm-4.7`。
 
 ## vision hook 做了什么
 
