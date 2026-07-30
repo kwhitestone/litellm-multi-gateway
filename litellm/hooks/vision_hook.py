@@ -61,9 +61,12 @@ class _VisionConfig(NamedTuple):
 
 
 def _parse_bool_after_colon(s: str) -> bool:
-    """从 'xxx: true   # 注释' 提取布尔值。"""
-    rest = s.split(":", 1)[1].strip().split()[0].lower()
-    return rest.startswith("true")
+    """从 '... needs_vision: true  # 注释' 提取布尔值。按关键字定位，避免行内其它冒号干扰。"""
+    for key in ("needs_vision:", "native_vision:"):
+        if key in s:
+            rest = s.split(key, 1)[1].strip().split()[0].lower()
+            return rest.startswith("true")
+    return False
 
 
 def _load_vision_config() -> _VisionConfig:
@@ -89,8 +92,10 @@ def _load_vision_config() -> _VisionConfig:
         if stripped == "model_list:":
             in_model_list = True
             continue
-        if in_model_list and stripped and not stripped.startswith(("- ", " ", "\t", "#")):
-            in_model_list = False  # 退出 model_list 段
+        # 退出 model_list 段：顶格非注释行（如 litellm_settings:）。用原始行缩进判断，
+        # 不能用 stripped（litellm_params: 行 stripped 后也顶格，但它在 model_list 内）
+        if in_model_list and stripped and not line.startswith((" ", "\t")) and not stripped.startswith("#"):
+            in_model_list = False
         if not in_model_list:
             continue
         # 新条目开始：先把上一条提交
@@ -210,18 +215,18 @@ async def _walk(blocks: list, ctx: dict) -> list:
         btype = block.get("type")
         if btype == "image" and ctx["n_img"] < MAX_IMAGES:
             ctx["n_img"] += 1
-            if ctx["needs_vision"]:
-                out.append(block)  # 原图透传
-            else:
+            if ctx["needs_vision"]:   # 后端需要转图（纯文本端点如 ark）
                 desc = await _describe(block)
                 out.append({"type": "text", "text": f"[image, described by {VISION_MODEL}]\n{desc}"})
+            else:   # 后端原生多模态，原图透传
+                out.append(block)
         elif btype == "image_url" and ctx["n_img"] < MAX_IMAGES:
             ctx["n_img"] += 1
-            if ctx["needs_vision"]:
-                out.append(block)  # 原图透传
-            else:
+            if ctx["needs_vision"]:   # 后端需要转图（纯文本端点如 ark）
                 desc = await _describe_openai(block)
                 out.append({"type": "text", "text": f"[image, described by {VISION_MODEL}]\n{desc}"})
+            else:   # 后端原生多模态，原图透传
+                out.append(block)
         elif btype in ("thinking", "redacted_thinking"):
             ctx["n_drop"] += 1
         elif btype == "server_tool_use":
@@ -288,7 +293,7 @@ class _VisionPreRequestHook(CustomLogger):
         if isinstance(system, list):
             kwargs["system"] = await _walk(system, ctx)
 
-        mode = "原图透传" if needs_vision else "转文字"
+        mode = "转文字" if needs_vision else "原图透传"
         _log(f"model={model} needs_vision={needs_vision}({mode}) 图片={ctx['n_img']} 剥离块={ctx['n_drop']}")
         return kwargs  # 返回 kwargs（messages 已 in-place 改）
 

@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-BASE="http://127.0.0.1:4000"   # 直连 litellm（key 管理不经 vision）
+BASE="http://127.0.0.1:4001"   # litellm（vision 已移入 litellm，端口统一 4001）
 # 新 key 默认可用的模型（profile 里出现的别名 + 实际模型名）
 MODELS='["glm-5.2","claude-sonnet-5","claude-opus-4-8","claude-haiku-4-5-20251001"]'
 
@@ -18,7 +18,8 @@ keys.sh - 管理客户端访问 key（绑 user，用量按 user 分开统计）
 
 用法:
   ./keys.sh                    显示帮助 + 现有 key 列表
-  ./keys.sh new <user> [alias] 给某个 user 创建新 key（明文只显示一次，请立即保存）
+  ./keys.sh new <user> [alias] [--backend ark|claude|zai|逗号多选]
+                 创建 key（默认后端 claude；--backend 决定该 key 走哪个后端）
   ./keys.sh list               列出所有 key（alias / user / hash）
   ./keys.sh delete <hash>      删除 key（hash 从 list 拿，支持前缀匹配）
 
@@ -26,7 +27,7 @@ keys.sh - 管理客户端访问 key（绑 user，用量按 user 分开统计）
   ./keys.sh new cc             创建绑 user=cc 的 key
   ./keys.sh new hermes 手机     创建绑 user=hermes、alias=手机 的 key
 
-客户端：BASE_URL=http://127.0.0.1:4001（带视觉）或 :4000（纯核心），token=<key>
+客户端：BASE_URL=http://127.0.0.1:4001（Anthropic）或 http://127.0.0.1:4001/v1（OpenAI），token=<key>
 EOF
 }
 
@@ -55,17 +56,56 @@ case "${1:-help}" in
     list_keys
     ;;
   new)
-    user="${2:?用法: $0 new <user> [alias]}"
-    alias="${3:-$user-key}"
+    shift   # 去掉 "new"
+    user=""; alias=""; backend=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --backend) backend="$2"; shift 2 ;;
+        -h|--help) echo "用法: $0 new <user> [alias] [--backend ark|claude|zai|逗号多选]"; exit 0 ;;
+        *) if [ -z "$user" ]; then user="$1"; elif [ -z "$alias" ]; then alias="$1"; fi; shift ;;
+      esac
+    done
+    [ -n "$user" ] || { echo "用法: $0 new <user> [alias] [--backend ark|claude|zai|逗号多选]"; exit 1; }
+    [ -z "$alias" ] && alias="$user-key"
+    # 单后端 key：cc 默认名 alias 到该后端（cc 不改配置即可走）；多后端 key：短名选后端
+    if [ -z "$backend" ]; then
+      read -rp "后端（ark/claude/zai，逗号分隔多选）[claude]: " backend
+      backend="${backend:-claude}"
+    fi
+    body=$(BACKENDS="$backend" KEY_USER="$user" KEY_ALIAS="$alias" python3 -c '
+import json,sys,os
+backends=[b.strip() for b in os.environ["BACKENDS"].split(",") if b.strip()]
+CC=["claude-sonnet-5","claude-sonnet-4-6","claude-opus-4-8","claude-opus-5","claude-haiku-4-5-20251001","claude-fable-5"]
+B={"ark":["ark-glm-5.2"], "claude":CC, "zai":["zai-glm-4.7"]}
+for b in backends:
+    if b not in B: print("错误:未知后端 "+b,file=sys.stderr); sys.exit(1)
+models=set(); aliases={}
+for b in backends:
+    for m in B[b]: models.add(m)
+if len(backends)==1:
+    b=backends[0]
+    if b!="claude":            # claude 后端的 model_name 就是 cc 默认名，无需 alias
+        t=B[b][0]
+        for c in CC: aliases[c]=t
+        models.update(CC)
+else:
+    short={"ark":"ark-glm-5.2","claude":"claude-sonnet-5","zai":"zai-glm-4.7"}
+    for b in backends: aliases[b]=short[b]
+    ct="claude-sonnet-5" if "claude" in backends else short[backends[0]]
+    for c in CC: aliases[c]=ct
+    models.update(CC)
+print(json.dumps({"user_id":os.environ["KEY_USER"],"key_alias":os.environ["KEY_ALIAS"],"models":sorted(models),"aliases":aliases}))
+')
+    [ -n "$body" ] || exit 1
     cg -X POST "$BASE/key/generate" \
       -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
-      -d "{\"user_id\":\"$user\",\"key_alias\":\"$alias\",\"models\":$MODELS}" \
-      | python3 -c "
+      -d "$body" \
+      | BACKEND="$backend" python3 -c "
 import json,sys
 d=json.load(sys.stdin)
 if 'key' not in d: print('创建失败:',d); sys.exit(1)
 k=d['key']
-print('✓ 创建成功')
+print('✓ 创建成功  后端:', sys.argv[1])
 print('  user :', d.get('user_id'))
 print('  alias:', d.get('key_alias'))
 print('  ┌──────────────────────────────────────────────────────────')
@@ -76,7 +116,7 @@ print()
 print('客户端配置:')
 print('  Claude Code : ANTHROPIC_BASE_URL=http://127.0.0.1:4001  ANTHROPIC_AUTH_TOKEN='+k)
 print('  OpenAI 客户端: base_url=http://127.0.0.1:4001/v1  api_key='+k)
-"
+" "$backend"
     ;;
   list)
     list_keys
