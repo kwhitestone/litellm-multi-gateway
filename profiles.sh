@@ -184,6 +184,7 @@ cmd_new() {
     done
     echo
     echo "litellm_settings:"
+    echo "  callbacks: [hooks.vision_hook.VisionPreRequestHook]   # vision hook：按模型 needs_vision 转图/透传"
     echo "  drop_params: true"
     echo "  request_timeout: 600"
     echo "  num_retries: 2"
