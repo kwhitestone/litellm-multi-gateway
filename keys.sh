@@ -8,14 +8,14 @@ BASE="http://127.0.0.1:4001"   # litellm（vision 已移入 litellm，端口统�
 cg() { curl -s --noproxy '*' "$@"; }
 
 # 单后端 -> 7 个 claude 名路由 {aliases, models}（new 单后端 + update 共用）
-#   ark: 全->ark-glm-5.2   claude: identity(名即真名)   zai: 全->zai-glm-4.7
+#   ark: 全->ark-glm-5.2   claude: identity(名即真名)   zai: 全->zai-glm-5.2
 cc_aliases() {
   BACKEND="${1:?用法: cc_aliases <ark|claude|zai>}" python3 -c '
 import json,os,sys
 b=os.environ["BACKEND"]
 CC=["claude-haiku-4-5-20251001","claude-sonnet-4-6","claude-sonnet-5",
     "claude-sonnet-4-8","claude-opus-4-8","claude-opus-5","claude-fable-5"]
-T={"ark":"ark-glm-5.2","claude":None,"zai":"zai-glm-4.7"}
+T={"ark":"ark-glm-5.2","claude":None,"zai":"zai-glm-5.2"}
 if b not in T: print("错误:未知后端 "+b,file=sys.stderr); sys.exit(1)
 t=T[b]
 print(json.dumps({"aliases":{c:(c if t is None else t) for c in CC},
@@ -113,10 +113,10 @@ import json,os,sys
 backends=[b.strip() for b in os.environ["BACKENDS"].split(",") if b.strip()]
 CC=["claude-haiku-4-5-20251001","claude-sonnet-4-6","claude-sonnet-5",
     "claude-sonnet-4-8","claude-opus-4-8","claude-opus-5","claude-fable-5"]
-B={"ark":["ark-glm-5.2"],"claude":CC,"zai":["zai-glm-4.7"]}
+B={"ark":["ark-glm-5.2"],"claude":CC,"zai":["zai-glm-5.2"]}
 for b in backends:
     if b not in B: print("错误:未知后端 "+b,file=sys.stderr); sys.exit(1)
-short={"ark":"ark-glm-5.2","claude":"claude-sonnet-5","zai":"zai-glm-4.7"}
+short={"ark":"ark-glm-5.2","claude":"claude-sonnet-5","zai":"zai-glm-5.2"}
 aliases={b:short[b] for b in backends}
 ct="claude-sonnet-5" if "claude" in backends else short[backends[0]]
 for c in CC: aliases[c]=ct
