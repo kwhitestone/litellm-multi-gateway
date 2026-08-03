@@ -1,0 +1,74 @@
+# =============================================================================
+# backends.yaml — 后端配置单一真相源（人类编辑这个文件）
+# =============================================================================
+# 改完跑：./keys.sh gen-config   （重新生成 litellm/profiles/multi.yaml）
+#         docker compose up -d   （重启 litellm 让新 config 生效）
+#
+# 每个后端声明：
+#   api_base       后端 API 地址
+#   key_env        读哪个环境变量当 api_key（对应 .env 里的变量名）
+#   needs_vision   true=纯文本端点，图片需转文字；false=原生多模态，图片原图透传
+#   models         该后端提供的模型，key=模型名，value.litellm_model=litellm 的 provider/model
+#   mapping        【可选】claude 名 -> 后端模型 的映射规则。省略=identity（名即真名）
+#
+# mapping 语法（key 可以是）：
+#   "*"                      通配默认（所有未显式指定的 claude 名都走它）
+#   "claude-sonnet-5"        精确全名（优先级最高）
+#   "claude-haiku-*"         通配前缀（* 只能在末尾）
+#   value 必须是该后端 models 里的一个模型名（不带后端前缀）。
+#
+# model_name 命名规则（gen-config 生成 multi.yaml 时）：
+#   非 claude 后端：<backend>-<model>，如 ark-glm-5.2、zai-glm-5.2
+#   claude 后端：model_name = 模型名本身（claude-sonnet-5），因 Claude Code 发默认名要直接命中
+# =============================================================================
+
+backends:
+  # ===== ark（火山方舟 coding plan，纯文本端点，图片需转文字）=====
+  ark:
+    api_base: https://ark.cn-beijing.volces.com/api/coding
+    key_env: ARK_API_KEY
+    needs_vision: true
+    models:
+      glm-5.2: { litellm_model: anthropic/glm-5.2 }
+    mapping:
+      "*": glm-5.2          # 所有 claude 名 -> ark-glm-5.2
+
+  # ===== claude（公司网关，原生多模态，图片原图透传）=====
+  # mapping 省略 → identity：claude-sonnet-5 映射到 claude-sonnet-5（名即真名）
+  claude:
+    api_base: https://aicoding-gateway.ndaeweb.com:8443
+    key_env: CLAUDE_CODE_KEY
+    needs_vision: false
+    models:
+      claude-haiku-4-5-20251001: { litellm_model: anthropic/claude-haiku-4-5-20251001 }
+      claude-sonnet-4-6: { litellm_model: anthropic/claude-sonnet-4-6 }
+      claude-sonnet-5: { litellm_model: anthropic/claude-sonnet-5 }
+      claude-sonnet-4-8: { litellm_model: anthropic/claude-sonnet-4-8 }
+      claude-opus-4-8: { litellm_model: anthropic/claude-opus-4-8 }
+      claude-opus-5: { litellm_model: anthropic/claude-opus-5 }
+      claude-fable-5: { litellm_model: anthropic/claude-fable-5 }
+
+  # ===== zai（智谱 BigModel，glm-5.2 纯文本，图片需转文字）=====
+  zai:
+    api_base: https://open.bigmodel.cn/api/anthropic
+    key_env: Z_AI_API_KEY
+    needs_vision: true
+    models:
+      glm-5.2: { litellm_model: anthropic/glm-5.2 }
+    mapping:
+      "*": glm-5.2          # 所有 claude 名 -> zai-glm-5.2
+
+# -----------------------------------------------------------------------------
+# 以下与后端无关，gen-config 时原样拼进 multi.yaml 尾部
+# -----------------------------------------------------------------------------
+litellm_settings:
+  callbacks: [hooks.vision_hook.VisionPreRequestHook]   # vision：按模型 needs_vision 转图/透传
+  drop_params: false   # claude 后端需原样转发 thinking+effort；ark/zai 若报参数错再单独处理
+  request_timeout: 600
+  num_retries: 2
+
+general_settings:
+  database_url: postgresql://litellm:litellm@db:5432/litellm
+  master_key: os.environ/ARK_API_KEY   # 网关访问密钥固定用 ARK_API_KEY，与后端 provider 解耦
+  store_model_in_db: true                # Admin UI Logs 页查看 request/response 详情
+  store_prompts_in_spend_logs: true      # 把请求 messages/响应存进 DB

@@ -112,10 +112,13 @@ The `needs_vision` lookup table is keyed by **both** forms, so either hook resol
 same answer. On `/v1/messages` both hooks fire; the first converts the images and the
 second is a no-op.
 
-The vision requirement is configured per-model in `multi.yaml` via simple comments:
+The vision requirement is configured per-backend in `backends.yaml` via the `needs_vision` flag:
 ```yaml
-- model_name: ark-glm-5.2   # needs_vision: true
-  litellm_params: { model: anthropic/glm-5.2, ... }
+backends:
+  ark:
+    needs_vision: true          # text-only endpoint → images converted to text
+    models:
+      glm-5.2: { litellm_model: anthropic/glm-5.2 }
 ```
 
 > **Trade-off:** With `needs_vision: true`, the backend receives a text description of the image rather than pixels. This works well for screenshots, UI mockups, and diagrams — but pixel-perfect tasks will have some loss.
@@ -133,9 +136,38 @@ The vision requirement is configured per-model in `multi.yaml` via simple commen
 
 ## Configuration
 
-### Backend config: `litellm/profiles/multi.yaml`
+### Backend config: `litellm/profiles/backends.yaml`
 
-This is the LiteLLM runtime config (mounted directly by docker-compose). Edit provider keys, models, and `needs_vision` flags here. After changes: `docker compose restart litellm`.
+This is the **single source of truth** for backends — provider endpoints, API keys, models,
+`needs_vision` flags, and how Claude model names map to each backend's models. Edit it to add
+a backend, add a model, or change routing. Then regenerate and restart:
+
+```bash
+./keys.sh gen-config          # regenerates litellm/profiles/multi.yaml from backends.yaml
+docker compose up -d          # restart litellm to pick up the new config
+```
+
+`multi.yaml` is **generated** — never edit it by hand.
+
+#### Mapping syntax
+
+Each backend declares its `models` and an optional `mapping` (Claude name → backend model).
+Omit `mapping` for an identity backend (like `claude`); use it to reroute names:
+
+```yaml
+backends:
+  ark:
+    models:
+      glm-5.2: { litellm_model: anthropic/glm-5.2 }
+      glm-4.6: { litellm_model: anthropic/glm-4.6 }
+    mapping:
+      "*": glm-5.2                 # default: all Claude names → glm-5.2
+      "claude-haiku-*": glm-4.6    # but haiku → the smaller glm-4.6
+      "claude-sonnet-5": glm-5.2   # exact name (highest priority)
+```
+
+Mapping keys, highest priority first: exact name (`claude-sonnet-5`) > prefix wildcard
+(`claude-haiku-*`, `*` only at end) > catch-all (`*`).
 
 ### Vision model: `.env`
 
@@ -153,7 +185,9 @@ Any OpenAI-compatible vision model works.
 litellm-multi-gateway/
 ├─ docker-compose.yml           # litellm + postgres (vision hook runs in-process)
 ├─ litellm/
-│  ├─ profiles/multi.yaml       # LiteLLM config (ARK/Anthropic/Zhipu multi-backend)
+│  ├─ profiles/multi.yaml       # LiteLLM config (generated from backends.yaml — do not edit)
+│  ├─ profiles/backends.yaml    # ← backend config: single source of truth (edit this)
+│  ├─ profiles/gen_config.py    # backends.yaml → multi.yaml generator + mapping resolver
 │  └─ hooks/vision_hook.py      # CustomLogger: auto image→text or passthrough
 ├─ keys.sh                      # Virtual key management CLI
 ├─ .env.example                 # Configuration template
@@ -177,7 +211,7 @@ Postgres isn't ready yet. Check with `docker compose ps` — wait for `db` to sh
 <details>
 <summary><b>ARK reports <code>Model only support text input</code></b></summary>
 
-Images aren't being converted. Check the model's `# needs_vision: true` flag in `multi.yaml`, and look for vision_hook logs: `docker compose logs litellm | grep vision_hook`.
+Images aren't being converted. Check the backend's `needs_vision: true` flag in `backends.yaml` (then `./keys.sh gen-config && docker compose up -d`), and look for vision_hook logs: `docker compose logs litellm | grep vision_hook`.
 </details>
 
 <details>
@@ -284,10 +318,13 @@ vision 是 litellm 的 CustomLogger（`litellm/hooks/vision_hook.py`），在请
 `needs_vision` 映射表两种 key 都建了一份，两个 hook 查到的结果一致。
 `/v1/messages` 上两个 hook 都会跑：第一个转完图，第二个是 no-op。
 
-在 `multi.yaml` 里用注释标记：
+在 `backends.yaml` 里按后端标记：
 ```yaml
-- model_name: ark-glm-5.2   # needs_vision: true
-  litellm_params: { ... }
+backends:
+  ark:
+    needs_vision: true          # 纯文本端点 → 图片转文字
+    models:
+      glm-5.2: { litellm_model: anthropic/glm-5.2 }
 ```
 
 > **取舍**：`needs_vision: true` 时后端拿到的是图片的文字描述而非像素，看截图/UI/图够用；`false` 时原图透传无损失。
@@ -305,7 +342,7 @@ vision 是 litellm 的 CustomLogger（`litellm/hooks/vision_hook.py`），在请
 
 ## 配置
 
-- **后端**：`litellm/profiles/multi.yaml`（直接编辑，`docker compose restart litellm` 生效）
+- **后端**：`litellm/profiles/backends.yaml`（单一真相源，编辑后跑 `./keys.sh gen-config` 重生成 multi.yaml，再 `docker compose up -d`）
 - **视觉模型**：`.env` 里 `VISION_API_KEY` / `VISION_BASE_URL` / `VISION_MODEL`（任何 OpenAI 兼容视觉模型都行）
 
 ## 常见问题
