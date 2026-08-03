@@ -92,11 +92,25 @@ Point your client to:
 
 ## How vision-to-text works
 
-The gateway includes a [LiteLLM CustomLogger hook](litellm/hooks/vision_hook.py) that runs **after** routing is decided but **before** the request hits the backend:
+The gateway includes a [LiteLLM CustomLogger hook](litellm/hooks/vision_hook.py) that rewrites the request before it hits the backend:
 
 - **`needs_vision: true`** (text-only backends like ARK/GLM): Images are sent to a vision model (default: Zhipu GLM-5V-Turbo, configurable to GPT-4o etc.) and converted to detailed text descriptions.
 - **`needs_vision: false`** (multimodal backends like Anthropic): Images are passed through untouched.
 - **All models**: Strips `thinking`/`server_tool_use` blocks and `cache_control.ttl` for protocol normalization.
+
+It implements **two** hook methods, because LiteLLM's two request chains have different
+hook points — `async_pre_request_hook` is only ever called from the Anthropic
+pass-through handler, so a hook implementing it alone silently does nothing on
+`/v1/chat/completions`:
+
+| Hook method | Covers | `model` value seen |
+|---|---|---|
+| `async_pre_call_hook` | all proxy endpoints (`/v1/chat/completions`, `/v1/messages`, …) — runs *before* routing | `model_name` alias, e.g. `zai-glm-5.2` |
+| `async_pre_request_hook` | `/v1/messages` only — runs *after* routing | `litellm_params.model`, e.g. `anthropic/glm-5.2` |
+
+The `needs_vision` lookup table is keyed by **both** forms, so either hook resolves the
+same answer. On `/v1/messages` both hooks fire; the first converts the images and the
+second is a no-op.
 
 The vision requirement is configured per-model in `multi.yaml` via simple comments:
 ```yaml
@@ -252,11 +266,23 @@ curl -s -o /dev/null -w "litellm: HTTP %{http_code}\n" http://127.0.0.1:4001/hea
 
 ## vision hook 做了什么
 
-vision 是 litellm 的 CustomLogger（`litellm/hooks/vision_hook.py`），在请求路由到后端**之后**、发往后端**之前**运行：
+vision 是 litellm 的 CustomLogger（`litellm/hooks/vision_hook.py`），在请求发往后端**之前**改写：
 
 - **`needs_vision: true`**（ark 等纯文本后端）：图片块用视觉模型转成文字描述
 - **`needs_vision: false`**（claude/zai 原生多模态）：图片块原图透传
 - **所有模型**：剥离 `thinking`/`server_tool_use` 及配对 `tool_result` + 剥掉 `cache_control.ttl`
+
+它实现了**两个** hook 方法，因为 litellm 两条请求链的钩子点不同 ——
+`async_pre_request_hook` 只有 anthropic pass-through handler 一个调用点，
+只实现它的话在 `/v1/chat/completions` 上会静默失效：
+
+| hook 方法 | 覆盖范围 | 拿到的 `model` |
+|---|---|---|
+| `async_pre_call_hook` | 所有 proxy 端点（`/v1/chat/completions`、`/v1/messages` 等），路由**前**跑 | `model_name` 别名，如 `zai-glm-5.2` |
+| `async_pre_request_hook` | 仅 `/v1/messages`，路由**后**跑 | `litellm_params.model`，如 `anthropic/glm-5.2` |
+
+`needs_vision` 映射表两种 key 都建了一份，两个 hook 查到的结果一致。
+`/v1/messages` 上两个 hook 都会跑：第一个转完图，第二个是 no-op。
 
 在 `multi.yaml` 里用注释标记：
 ```yaml
