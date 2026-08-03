@@ -50,6 +50,7 @@ cd litellm-multi-gateway
 cp .env.example .env
 # Edit .env: add your provider API keys (ARK_API_KEY, CLAUDE_CODE_KEY, Z_AI_API_KEY)
 
+./keys.sh gen-config            # Generate litellm config from backends.yaml (first run only)
 docker compose up -d            # Starts litellm + postgres (~40s for first init)
 ```
 
@@ -259,6 +260,7 @@ cd litellm-multi-gateway
 cp .env.example .env
 # 编辑 .env：填三个后端的 key
 
+./keys.sh gen-config            # 从 backends.yaml 生成 litellm 配置（首次必须跑）
 docker compose up -d            # 起 litellm + postgres（首次约 40s）
 ```
 
