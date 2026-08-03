@@ -1,19 +1,15 @@
 # profile: multi
-# desc: 多后端共存（ark/claude/zai 同时加载），按 key aliases 路由到不同后端
-# native_vision: false   # 全局回退（per-model 的 needs_vision 标记优先）
+# desc: 多后端共存，按 key aliases 路由到不同后端
 #
-# 切换后建议：
-#   docker compose up -d
-#   Claude Code BASE_URL = http://127.0.0.1:4001
-#   用 keys.sh new <user> --backend <ark|claude|zai> 给 key 配后端
+# ⚠️ 自动生成，勿手改。改 litellm/profiles/backends.yaml 后跑：./keys.sh gen-config
+#
 ---
 model_list:
-  # ===== ark（火山方舟 coding plan，纯文本端点，图片需转文字）=====
+  # ===== ark（needs_vision=true）=====
   - model_name: ark-glm-5.2   # needs_vision: true
     litellm_params: { model: anthropic/glm-5.2, api_base: https://ark.cn-beijing.volces.com/api/coding, api_key: os.environ/ARK_API_KEY }
 
-  # ===== claude（公司网关，原生多模态，图片原图透传）=====
-  # model_name 用 Claude 真名，cc 不配 *_MODEL 时发的默认名直接命中 claude 后端
+  # ===== claude（needs_vision=false）=====
   - model_name: claude-haiku-4-5-20251001   # needs_vision: false
     litellm_params: { model: anthropic/claude-haiku-4-5-20251001, api_base: https://aicoding-gateway.ndaeweb.com:8443, api_key: os.environ/CLAUDE_CODE_KEY }
   - model_name: claude-sonnet-4-6   # needs_vision: false
@@ -29,18 +25,18 @@ model_list:
   - model_name: claude-fable-5   # needs_vision: false
     litellm_params: { model: anthropic/claude-fable-5, api_base: https://aicoding-gateway.ndaeweb.com:8443, api_key: os.environ/CLAUDE_CODE_KEY }
 
-  # ===== zai（智谱 BigModel，glm-5.2 纯文本，图片需转文字）=====
+  # ===== zai（needs_vision=true）=====
   - model_name: zai-glm-5.2   # needs_vision: true
     litellm_params: { model: anthropic/glm-5.2, api_base: https://open.bigmodel.cn/api/anthropic, api_key: os.environ/Z_AI_API_KEY }
 
 litellm_settings:
-  callbacks: [hooks.vision_hook.VisionPreRequestHook]   # vision 移入 litellm：按模型 needs_vision 转图/透传
-  drop_params: false   # claude 后端需原样转发 thinking+effort；ark/zai 若报参数错再单独处理
+  callbacks: [hooks.vision_hook.VisionPreRequestHook]
+  drop_params: false
   request_timeout: 600
   num_retries: 2
 
 general_settings:
   database_url: postgresql://litellm:litellm@db:5432/litellm
-  master_key: os.environ/ARK_API_KEY   # 网关访问密钥固定用 ARK_API_KEY，与后端 provider 解耦
-  store_model_in_db: true                # Admin UI Logs 页查看 request/response 详情（官方两行之一）
-  store_prompts_in_spend_logs: true      # 把请求 messages/响应存进 DB（官方两行之二）
+  master_key: os.environ/ARK_API_KEY
+  store_model_in_db: true
+  store_prompts_in_spend_logs: true
