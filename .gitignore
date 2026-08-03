@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# 生成产物（由 ./keys.sh gen-config 从 backends.yaml 生成，勿手改勿提交）
+litellm/profiles/multi.yaml
+
 # Claude Code 会话/计划（本地产物，不进 git）
 .claude/
 
