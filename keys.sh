@@ -34,10 +34,10 @@ keys.sh - 管理客户端访问 key（绑 user，用量按 user 分开统计）
 
 用法:
   ./keys.sh                    显示帮助 + 现有 key 列表
-  ./keys.sh new <user> [alias] [--backend ark|claude|zai|逗号多选]
+  ./keys.sh new <user> [alias] [--backend ark|claude|claude_1|claude_2|zai|逗号多选]
                  创建 key（默认后端 claude；--backend 决定该 key 走哪个后端）
   ./keys.sh list               列出所有 key（alias / user / hash）
-  ./keys.sh update <key> --backend ark|claude|zai   动态改该 key 的 7 名路由（不重启 litellm）
+  ./keys.sh update <key> --backend ark|claude|claude_1|claude_2|zai   动态改该 key 的 7 名路由（不重启 litellm）
   ./keys.sh delete <hash>      删除 key（hash 从 list 拿，支持前缀匹配）
   ./keys.sh gen-config         从 backends.yaml 重新生成 multi.yaml（改完后端配置后跑）
 
@@ -68,9 +68,11 @@ except Exception: info={}
 al=info.get('aliases') or {}
 bks=set()
 for k,v in al.items():
-    if k in ('ark','claude','zai'): bks.add(k)       # 多后端短名
+    if k in ('ark','claude','zai','claude_1','claude_2'): bks.add(k)  # 多后端短名
     v=str(v)
-    if v.startswith('ark-'): bks.add('ark')
+    if v.startswith('claude_1-'): bks.add('claude_1')
+    elif v.startswith('claude_2-'): bks.add('claude_2')
+    elif v.startswith('ark-'): bks.add('ark')
     elif v.startswith('zai-'): bks.add('zai')
     elif v.startswith('claude'): bks.add('claude')
 backend=','.join(sorted(bks)) if bks else '?'
@@ -91,15 +93,15 @@ case "${1:-help}" in
     while [ $# -gt 0 ]; do
       case "$1" in
         --backend) backend="$2"; shift 2 ;;
-        -h|--help) echo "用法: $0 new <user> [alias] [--backend ark|claude|zai|逗号多选]"; exit 0 ;;
+        -h|--help) echo "用法: $0 new <user> [alias] [--backend ark|claude|claude_1|claude_2|zai|逗号多选]"; exit 0 ;;
         *) if [ -z "$user" ]; then user="$1"; elif [ -z "$alias" ]; then alias="$1"; fi; shift ;;
       esac
     done
-    [ -n "$user" ] || { echo "用法: $0 new <user> [alias] [--backend ark|claude|zai|逗号多选]"; exit 1; }
+    [ -n "$user" ] || { echo "用法: $0 new <user> [alias] [--backend ark|claude|claude_1|claude_2|zai|逗号多选]"; exit 1; }
     [ -z "$alias" ] && alias="$user-key"
     # 单后端 key：cc 默认名 alias 到该后端（cc 不改配置即可走）；多后端 key：短名选后端
     if [ -z "$backend" ]; then
-      read -rp "后端（ark/claude/zai，逗号分隔多选）[claude]: " backend
+      read -rp "后端（ark/claude/claude_1/claude_2/zai，逗号分隔多选）[claude]: " backend
       backend="${backend:-claude}"
     fi
     if [ "$(echo "$backend" | tr ',' '\n' | grep -c .)" -eq 1 ]; then
@@ -180,12 +182,12 @@ print('✓ 删除成功:', d.get('message') or d.get('deleted_keys') or d)
     while [ $# -gt 0 ]; do
       case "$1" in
         --backend) backend="$2"; shift 2 ;;
-        -h|--help) echo "用法: $0 update <key明文|hash|前缀> --backend ark|claude|zai  （动态改路由，不重启 litellm）"; exit 0 ;;
+        -h|--help) echo "用法: $0 update <key明文|hash|前缀> --backend ark|claude|claude_1|claude_2|zai  （动态改路由，不重启 litellm）"; exit 0 ;;
         *) [ -z "$key" ] && key="$1"; shift ;;
       esac
     done
-    [ -n "$key" ] || { echo "用法: $0 update <key明文|hash|前缀> --backend ark|claude|zai"; exit 1; }
-    if [ -z "$backend" ]; then read -rp "新后端（ark/claude/zai）: " backend; fi
+    [ -n "$key" ] || { echo "用法: $0 update <key明文|hash|前缀> --backend ark|claude|claude_1|claude_2|zai"; exit 1; }
+    if [ -z "$backend" ]; then read -rp "新后端（ark/claude/claude_1/claude_2/zai）: " backend; fi
     full=$(resolve_key "$key")
     [ -n "$full" ] || { echo "错误: 无法解析 key '$key'（明文 sk- / hash / 前缀）" >&2; exit 1; }
     [ "$full" != "$key" ] && echo "  匹配完整 hash: $full"

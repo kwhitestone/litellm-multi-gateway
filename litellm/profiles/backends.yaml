@@ -48,6 +48,35 @@ backends:
       claude-opus-5: { litellm_model: anthropic/claude-opus-5 }
       claude-fable-5: { litellm_model: anthropic/claude-fable-5 }
 
+  # ===== claude_1 / claude_2（同公司网关，不同 key，隔离用量）=====
+  # 与 claude 后端完全相同，仅 key_env 不同。gen_config 自动加前缀（claude_1-claude-sonnet-5），
+  # model_list 不会撞名。虚拟 key --backend claude_1 即可路由到独立 key。
+  claude_1:
+    api_base: https://aicoding-gateway.ndaeweb.com:8443
+    key_env: CLAUDE_CODE_KEY_1
+    needs_vision: false
+    models:
+      claude-haiku-4-5-20251001: { litellm_model: anthropic/claude-haiku-4-5-20251001 }
+      claude-sonnet-4-6: { litellm_model: anthropic/claude-sonnet-4-6 }
+      claude-sonnet-5: { litellm_model: anthropic/claude-sonnet-5 }
+      claude-sonnet-4-8: { litellm_model: anthropic/claude-sonnet-4-8 }
+      claude-opus-4-8: { litellm_model: anthropic/claude-opus-4-8 }
+      claude-opus-5: { litellm_model: anthropic/claude-opus-5 }
+      claude-fable-5: { litellm_model: anthropic/claude-fable-5 }
+
+  claude_2:
+    api_base: https://aicoding-gateway.ndaeweb.com:8443
+    key_env: CLAUDE_CODE_KEY_2
+    needs_vision: false
+    models:
+      claude-haiku-4-5-20251001: { litellm_model: anthropic/claude-haiku-4-5-20251001 }
+      claude-sonnet-4-6: { litellm_model: anthropic/claude-sonnet-4-6 }
+      claude-sonnet-5: { litellm_model: anthropic/claude-sonnet-5 }
+      claude-sonnet-4-8: { litellm_model: anthropic/claude-sonnet-4-8 }
+      claude-opus-4-8: { litellm_model: anthropic/claude-opus-4-8 }
+      claude-opus-5: { litellm_model: anthropic/claude-opus-5 }
+      claude-fable-5: { litellm_model: anthropic/claude-fable-5 }
+
   # ===== zai（智谱 BigModel，glm-5.2 纯文本，图片需转文字）=====
   zai:
     api_base: https://open.bigmodel.cn/api/anthropic
