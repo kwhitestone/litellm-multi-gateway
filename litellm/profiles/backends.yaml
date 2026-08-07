@@ -72,3 +72,4 @@ general_settings:
   master_key: os.environ/ARK_API_KEY   # 网关访问密钥固定用 ARK_API_KEY，与后端 provider 解耦
   store_model_in_db: true                # Admin UI Logs 页查看 request/response 详情
   store_prompts_in_spend_logs: true      # 把请求 messages/响应存进 DB
+  forward_client_headers_to_llm_api: true   # 转发 anthropic-beta 等 header（skills/ToolSearch 依赖）
