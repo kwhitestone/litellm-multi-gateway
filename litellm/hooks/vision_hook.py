@@ -9,6 +9,9 @@ VisionPreRequestHook - litellm CustomLogger，在请求发往后端前改写 mes
   - needs_vision=false 的模型：图片块原图透传（原生多模态后端）
   - 所有模型：剥离 thinking/server_tool_use 及配对 tool_result（协议归一化）
   - 所有模型：剥掉 cache_control.ttl 避免 1h/5m 顺序冲突
+  - 所有模型：移除 tool_result 内引用了 deferred 工具的 tool_reference block
+    （Claude Code 的 deferred tools 机制会把 TodoWrite 等工具从 tools 数组移除，
+    但 tool_result 里可能还引用它们，Anthropic API 会报 400）
 
 挂两个 hook，因为 litellm 两条请求链的钩子点不同：
   1) async_pre_call_hook   —— proxy 层通用，覆盖 /v1/chat/completions、/v1/messages
@@ -293,6 +296,15 @@ async def _walk(blocks: list, ctx: dict) -> list:
             nb = dict(block)
             nb["content"] = await _walk(block["content"], ctx)
             out.append(nb)
+        elif btype == "tool_reference":
+            # Claude Code deferred tools：tools 数组里可能没有此工具（被
+            # DeferredToolPlaceholder 替代），Anthropic API 会拒绝引用未声明工具的
+            # tool_reference block。移除它即可——它只是元数据，不影响对话逻辑。
+            tool_name = block.get("tool_name", "?")
+            if tool_name not in ctx["tool_names"]:
+                ctx["n_drop"] += 1
+            else:
+                out.append(block)
         else:
             out.append(block)
     return out
@@ -325,6 +337,12 @@ async def _transform(model: str, messages: List, container: Dict, where: str) ->
         if key in container:
             _strip_cache_ttl(container[key])
 
+    # 收集 tools 数组里声明的工具名，用于过滤 tool_reference block
+    tool_names: set[str] = set()
+    for t in (container.get("tools") or []):
+        if isinstance(t, dict) and t.get("name"):
+            tool_names.add(t["name"])
+
     # 收集 server_tool_use id（用于剥离配对 tool_result）
     server_ids = set()
     for m in messages:
@@ -333,7 +351,7 @@ async def _transform(model: str, messages: List, container: Dict, where: str) ->
                 if isinstance(b, dict) and b.get("type") == "server_tool_use" and b.get("id"):
                     server_ids.add(b["id"])
 
-    ctx = {"n_img": 0, "n_drop": 0, "server_ids": server_ids, "needs_vision": needs_vision}
+    ctx = {"n_img": 0, "n_drop": 0, "server_ids": server_ids, "needs_vision": needs_vision, "tool_names": tool_names}
     for m in messages:
         if isinstance(m, dict) and isinstance(m.get("content"), list):
             new_content = await _walk(m["content"], ctx)
