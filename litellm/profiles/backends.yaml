@@ -102,3 +102,8 @@ general_settings:
   store_model_in_db: true                # Admin UI Logs 页查看 request/response 详情
   store_prompts_in_spend_logs: true      # 把请求 messages/响应存进 DB
   forward_client_headers_to_llm_api: true   # 转发 anthropic-beta 等 header（skills/ToolSearch 依赖）
+  ip_allowlist:                          # IP 白名单：只有列表内 IP 能访问网关
+    - "127.0.0.1"                        # 本机（默认场景）
+    # 需要远程访问时取消注释并填实际 IP：
+    # - "192.168.1.0/24"                # 局域网网段
+    # - "203.0.113.5"                   # 特定公网 IP
