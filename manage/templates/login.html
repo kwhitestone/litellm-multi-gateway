@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 · 网关管理</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+           background: #f5f5f7; color: #1d1d1f; min-height: 100vh;
+           display: flex; align-items: center; justify-content: center; }
+    .card { background: #fff; border-radius: 16px; padding: 36px 40px; width: 380px;
+            box-shadow: 0 4px 24px rgba(0,0,0,.08); }
+    h1 { font-size: 22px; text-align: center; margin-bottom: 6px; }
+    .sub { color: #86868b; font-size: 13px; text-align: center; margin-bottom: 24px; }
+    label { font-size: 13px; color: #6e6e73; display: block; margin-bottom: 6px; font-weight: 500; }
+    input { width: 100%; padding: 11px 14px; border: 1px solid #d2d2d7; border-radius: 10px;
+            font-size: 14px; background: #fff; margin-bottom: 16px; }
+    input:focus { outline: none; border-color: #0071e3; box-shadow: 0 0 0 3px rgba(0,113,227,.15); }
+    button { width: 100%; background: #0071e3; color: #fff; border: none; padding: 12px;
+             border-radius: 980px; font-size: 15px; font-weight: 600; cursor: pointer; }
+    button:hover { background: #0077ed; }
+    button:disabled { background: #d2d2d7; cursor: not-allowed; }
+    .err { color: #ff3b30; font-size: 13px; text-align: center; margin-top: 14px; min-height: 18px; }
+    .hint { color: #aeaeb2; font-size: 11px; text-align: center; margin-top: 20px; line-height: 1.6; }
+    .lock { text-align: center; font-size: 40px; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="lock">🔐</div>
+    <h1>网关管理登录</h1>
+    <p class="sub">输入管理密钥进入 Key 管理后台</p>
+    <form id="loginForm" onsubmit="return doLogin(event)">
+      <label for="mk">管理密钥（Master Key）</label>
+      <input id="mk" type="password" placeholder="GATEWAY_MASTER_KEY" autofocus>
+      <button id="btn" type="submit">登录</button>
+    </form>
+    <div class="err" id="err"></div>
+    <p class="hint">登录态保持 12 小时，期间操作自动续期<br>登录有审计记录</p>
+  </div>
+  <script>
+    async function doLogin(e) {
+      e.preventDefault();
+      const mk = document.getElementById('mk').value;
+      const btn = document.getElementById('btn');
+      const err = document.getElementById('err');
+      if (!mk) { err.textContent = '请输入管理密钥'; return false; }
+      btn.disabled = true; btn.textContent = '验证中…'; err.textContent = '';
+      try {
+        const r = await fetch('/manage/api/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: mk })
+        });
+        if (r.ok) {
+          const next = new URLSearchParams(location.search).get('next') || '/manage/';
+          location.href = next;
+        } else {
+          const d = await r.json().catch(() => ({}));
+          err.textContent = d.detail || '密钥错误';
+          btn.disabled = false; btn.textContent = '登录';
+        }
+      } catch (ex) { err.textContent = '网络错误'; btn.disabled = false; btn.textContent = '登录'; }
+      return false;
+    }
+  </script>
+</body>
+</html>

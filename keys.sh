@@ -25,8 +25,8 @@ print(hits[0] if hits else '')
 " "$q"
 }
 
-MASTER=$(grep -E '^ARK_API_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2-)
-[ -z "$MASTER" ] && { echo "错误：.env 里没有 ARK_API_KEY（master key）" >&2; exit 1; }
+MASTER=$(grep -E '^GATEWAY_MASTER_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2-)
+[ -z "$MASTER" ] && { echo "错误：.env 里没有 GATEWAY_MASTER_KEY（master key）" >&2; exit 1; }
 
 show_help() {
   cat <<'EOF'

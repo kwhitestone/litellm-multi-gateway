@@ -1,0 +1,2 @@
+# 自建管理页依赖（litellm 镜像通常已含 jinja2/httpx/pyyaml，这里显式声明保险）
+jinja2>=3.0

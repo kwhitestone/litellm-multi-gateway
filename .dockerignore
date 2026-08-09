@@ -1,0 +1,15 @@
+# 不进构建上下文（密钥/本地数据/生成产物）
+.env
+.env.*
+.git
+.gitignore
+.claude
+docker-compose.yml
+litellm/profiles/multi.yaml
+__pycache__/
+*.pyc
+.venv/
+pg-data/
+.DS_Store
+*.md
+!requirements-manage.txt

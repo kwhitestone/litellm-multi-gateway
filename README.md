@@ -221,6 +221,24 @@ Images aren't being converted. Check the backend's `needs_vision: true` flag in 
 Colima's port forwarding occasionally breaks. Run `colima restart` to rebuild it.
 </details>
 
+## Deploy to PaaS (Railway / Render / Fly)
+
+The repo ships a single `Dockerfile` for public cloud deployment. Postgres uses a managed instance (connection string via env); key management uses a friendly web UI at `/manage/` — no CLI needed.
+
+**Steps:**
+1. Import the repo into your PaaS — it auto-builds from the root `Dockerfile` (single container: LiteLLM + manage page + vision hook).
+2. Provision a managed Postgres, set env vars (see [SECURITY.md](SECURITY.md) §4 for the full list): `DATABASE_URL`, `GATEWAY_MASTER_KEY`, `ARK_API_KEY`, `CLAUDE_CODE_KEY`, `Z_AI_API_KEY`, `UI_USERNAME`/`UI_PASSWORD`.
+3. PaaS assigns an HTTPS domain.
+4. Open `https://<your-domain>/manage/?k=<GATEWAY_MASTER_KEY>` → create keys (pick backend, set budget) → get `sk-...` client keys.
+5. Point clients at `https://<your-domain>` with the created key.
+
+The PaaS provides TLS termination — no certificate setup needed. The container auto-runs `prisma db push` on startup, so a fresh empty database migrates itself.
+
+**Verify the image locally without touching production:**
+```bash
+./scripts/verify-image.sh   # port 4002 + isolated db, auto-cleans on exit
+```
+
 ## Contributing
 
 PRs welcome! This project aims to be a practical, no-nonsense gateway for multi-backend LLM routing. If you've added support for a new provider, improved the vision hook, or found a bug — open an issue or submit a PR.
@@ -346,6 +364,24 @@ backends:
 
 - **后端**：`litellm/profiles/backends.yaml`（单一真相源，编辑后跑 `./keys.sh gen-config` 重生成 multi.yaml，再 `docker compose up -d`）
 - **视觉模型**：`.env` 里 `VISION_API_KEY` / `VISION_BASE_URL` / `VISION_MODEL`（任何 OpenAI 兼容视觉模型都行）
+
+## 部署到 PaaS（Railway / Render / Fly）
+
+仓库根目录的 `Dockerfile` 用于公共云部署：单容器镜像，Postgres 用平台托管实例（连接串走环境变量），key 管理用 `/manage/` 友好管理页，**无需 CLI**。
+
+**步骤：**
+1. 把仓库导入 PaaS —— 平台自动用根目录 `Dockerfile` 构建单容器（LiteLLM + 管理页 + vision hook）。
+2. 申请一个托管 Postgres，在平台 UI 配环境变量（完整清单见 [SECURITY.md](SECURITY.md) 第四节）：`DATABASE_URL`、`GATEWAY_MASTER_KEY`、`ARK_API_KEY`、`CLAUDE_CODE_KEY`、`Z_AI_API_KEY`、`UI_USERNAME`/`UI_PASSWORD`。
+3. 平台分配 HTTPS 域名。
+4. 浏览器打开 `https://<你的域名>/manage/?k=<GATEWAY_MASTER_KEY>` → 创建 key（选后端、设预算）→ 拿到 `sk-...` 客户端 key。
+5. 客户端用 `https://<你的域名>` 作 BASE_URL + 创建的 key 接入。
+
+PaaS 默认提供 HTTPS（TLS 终止），无需自配证书。容器启动时自动跑 `prisma db push`，全新空库会自动建表迁移。
+
+**本地验证镜像（不影响线上）：**
+```bash
+./scripts/verify-image.sh   # 用 4002 端口 + 隔离 db，跑完自动清理
+```
 
 ## 常见问题
 

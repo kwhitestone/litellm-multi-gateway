@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>网关管理 · Key 管理</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+           background: #f5f5f7; color: #1d1d1f; padding: 24px; line-height: 1.5; }
+    h1 { font-size: 22px; margin-bottom: 4px; }
+    h2 { font-size: 16px; margin: 24px 0 10px; color: #6e6e73; font-weight: 600; }
+    .sub { color: #86868b; font-size: 13px; margin-bottom: 20px; }
+    .card { background: #fff; border-radius: 12px; padding: 20px 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+    label { font-size: 13px; color: #6e6e73; display: block; margin-bottom: 4px; font-weight: 500; }
+    input, select { width: 100%; padding: 8px 12px; border: 1px solid #d2d2d7; border-radius: 8px;
+                    font-size: 14px; background: #fff; }
+    input:focus, select:focus { outline: none; border-color: #0071e3; box-shadow: 0 0 0 3px rgba(0,113,227,.15); }
+    .hint { font-size: 11px; color: #aeaeb2; margin-top: 3px; }
+    .checkboxes { display: flex; flex-wrap: wrap; gap: 10px; }
+    .checkboxes label { display: flex; align-items: center; gap: 5px; font-size: 14px; color: #1d1d1f;
+                        background: #f5f5f7; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-weight: 400; }
+    .checkboxes input { width: auto; }
+    button { background: #0071e3; color: #fff; border: none; padding: 10px 24px; border-radius: 980px;
+             font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 12px; }
+    button:hover { background: #0077ed; }
+    button:disabled { background: #d2d2d7; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 8px 10px; color: #6e6e73; font-weight: 600; border-bottom: 1px solid #d2d2d7; }
+    td { padding: 8px 10px; border-bottom: 1px solid #f0f0f2; }
+    .mono { font-family: "SF Mono", "Fira Code", Consolas, monospace; font-size: 12px; color: #424245; }
+    .hash { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
+    .del { background: none; color: #ff3b30; padding: 2px 8px; font-size: 12px; border-radius: 6px; margin: 0; }
+    .del:hover { background: #fff2f0; }
+    .budget { color: #34c759; font-weight: 600; }
+    .budget.none { color: #aeaeb2; font-weight: 400; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+    .badge.claude { background: #e8f0fe; color: #1a73e8; }
+    .badge.ark { background: #fef7e0; color: #b06000; }
+    .badge.zai { background: #f5f0ff; color: #7c3aed; }
+    .badge.claude_1, .badge.claude_2 { background: #e8f8f0; color: #137333; }
+    #result { display: none; }
+    .key-box { background: #f5f5f7; border: 1px dashed #d2d2d7; border-radius: 8px; padding: 12px 16px;
+               font-family: monospace; font-size: 14px; word-break: break-all; margin: 12px 0; cursor: pointer; }
+    .key-box:hover { border-color: #0071e3; }
+    .config-snippet { background: #1d1d1f; color: #f5f5f7; border-radius: 8px; padding: 14px 16px;
+                      font-family: monospace; font-size: 12px; overflow-x: auto; margin-top: 8px; white-space: pre; }
+    .toast { position: fixed; top: 20px; right: 20px; background: #1d1d1f; color: #fff; padding: 10px 18px;
+             border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .3s; z-index: 999; }
+    .toast.show { opacity: 1; }
+    .toast.err { background: #ff3b30; }
+    a { color: #0071e3; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>🔑 Key 管理
+    <form method="post" action="/manage/logout" style="display:inline;float:right">
+      <button type="submit" style="background:#e5e5ea;color:#1d1d1f;margin:0;padding:6px 16px;font-size:13px">退出登录</button>
+    </form>
+  </h1>
+  <p class="sub">创建 / 查看 / 删除客户端访问密钥。创建时选择后端，系统自动绑定模型路由。</p>
+
+  <!-- 创建表单 -->
+  <div class="card">
+    <h2 style="margin-top:0">创建新 Key</h2>
+    <div class="grid">
+      <div>
+        <label for="user">用户名 <span style="color:#ff3b30">*</span></label>
+        <input id="user" placeholder="如 cc、hermes、张三">
+      </div>
+      <div>
+        <label for="alias">别名（可选）</label>
+        <input id="alias" placeholder="留空则自动用「用户名-key」">
+      </div>
+      <div style="grid-column:1/-1">
+        <label>后端 <span style="color:#ff3b30">*</span></label>
+        <div class="checkboxes" id="backends">
+          {% for b in backends %}
+          <label><input type="checkbox" value="{{ b }}" class="be"> {{ b }}</label>
+          {% endfor %}
+        </div>
+        <div class="hint">单选 = 该 key 只走这个后端；多选 = 用 model=后端名 切换（逗号分隔）</div>
+      </div>
+      <div>
+        <label for="budget">预算上限 $（可选）</label>
+        <input id="budget" type="number" step="0.01" min="0" placeholder="如 10">
+        <div class="hint">到顶自动拒绝，按月重置</div>
+      </div>
+      <div>
+        <label for="rpm">RPM 限制（可选）</label>
+        <input id="rpm" type="number" min="0" placeholder="如 30">
+        <div class="hint">每分钟最大请求数</div>
+      </div>
+    </div>
+    <button id="createBtn" onclick="createKey()">创建 Key</button>
+  </div>
+
+  <!-- 创建结果 -->
+  <div class="card" id="result">
+    <h2 style="margin-top:0;color:#34c759">✓ 创建成功</h2>
+    <p class="sub">下面这把 key 只显示这一次，请立即保存：</p>
+    <div class="key-box" id="newKey" onclick="copyText(this.textContent, 'key 已复制')">点这里复制</div>
+    <h2 style="font-size:13px">Claude Code 配置</h2>
+    <div class="config-snippet" id="ccConfig"></div>
+    <h2 style="font-size:13px">OpenAI 客户端配置</h2>
+    <div class="config-snippet" id="oaiConfig"></div>
+  </div>
+
+  <!-- 现有 key 列表 -->
+  <div class="card">
+    <h2 style="margin-top:0">现有 Key（{{ keys|length }}）</h2>
+    {% if keys %}
+    <table>
+      <thead>
+        <tr><th>别名</th><th>用户</th><th>后端</th><th>用量</th><th>Key（hash）</th><th>映射</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for k in keys %}
+        <tr id="row-{{ k.hash[:12] }}">
+          <td>{{ k.alias }}</td>
+          <td>{{ k.user }}</td>
+          <td>
+            {% for b in k.backend.split(', ') %}
+            <span class="badge {{ b.strip() }}">{{ b.strip() }}</span>
+            {% endfor %}
+          </td>
+          <td>
+            <span class="budget {{ '' if k.max_budget else 'none' }}">
+              ${{ '%.2f'|format(k.spend|default(0)) }}{{ ' / $%.2f'|format(k.max_budget) if k.max_budget else ' / ∞' }}
+            </span>
+          </td>
+          <td><span class="hash mono" title="{{ k.hash }}">{{ k.hash[:20] }}…</span></td>
+          <td>
+            {% if k.mappings %}
+            <a href="javascript:void(0)" onclick="var e=document.getElementById('map-{{ k.hash[:12] }}'); e.style.display = e.style.display==='none'?'table-row':'none'"
+               style="font-size:12px">{{ k.mappings|length }} 条映射 ▾</a>
+            {% else %}
+            <span class="sub" style="font-size:12px">-</span>
+            {% endif %}
+          </td>
+          <td>
+            <button class="del" onclick="toggleEdit('{{ k.hash[:12] }}', '{{ k.backend }}')" style="background:none;color:#0071e3;padding:2px 8px">编辑</button>
+            <button class="del" onclick="deleteKey('{{ k.hash }}', '{{ k.alias }}')">删除</button>
+          </td>
+        </tr>
+        <tr id="edit-{{ k.hash[:12] }}" style="display:none;background:#f5f5f7">
+          <td colspan="7" style="padding:12px 16px">
+            <div class="grid" style="grid-template-columns:2fr 1fr 1fr 1fr;gap:10px;align-items:end">
+              <div>
+                <label style="font-size:12px">改后端（留空=不改）</label>
+                <div class="checkboxes" id="edit-be-{{ k.hash[:12] }}" style="flex-wrap:wrap;gap:6px">
+                  {% for b in backends %}
+                  <label style="font-size:12px;padding:3px 8px"><input type="checkbox" value="{{ b }}" class="ebe-{{ k.hash[:12] }}"> {{ b }}</label>
+                  {% endfor %}
+                </div>
+              </div>
+              <div>
+                <label style="font-size:12px">预算 $（0=清空）</label>
+                <input id="edit-budget-{{ k.hash[:12] }}" type="number" step="0.01" min="0" placeholder="不改" style="padding:5px 8px;font-size:12px">
+              </div>
+              <div>
+                <label style="font-size:12px">RPM</label>
+                <input id="edit-rpm-{{ k.hash[:12] }}" type="number" min="0" placeholder="不改" style="padding:5px 8px;font-size:12px">
+              </div>
+              <div>
+                <button onclick="saveEdit('{{ k.hash[:12] }}', '{{ k.hash }}')" style="margin:0;padding:6px 14px;font-size:12px">保存</button>
+              </div>
+            </div>
+          </td>
+        </tr>
+        <tr id="map-{{ k.hash[:12] }}" style="display:none;background:#f5f5f7">
+          <td colspan="7" style="padding:10px 16px">
+            <table style="width:100%;font-size:12px">
+              <tr><th style="width:40%;color:#6e6e73">客户端发送的模型名</th><th style="color:#6e6e73">→ 实际路由到</th></tr>
+              {% for m in k.mappings %}
+              <tr><td class="mono">{{ m.from }}</td><td class="mono">{{ m.to }}</td></tr>
+              {% endfor %}
+            </table>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="sub">还没有 key。在上方创建第一个。</p>
+    {% endif %}
+  </div>
+
+  <p class="sub" style="margin-top:20px;text-align:center">
+    网关地址：<a href="{{ base_url }}" class="mono">{{ base_url }}</a> ·
+    <a href="{{ base_url }}/ui">LiteLLM 原生 UI</a>
+  </p>
+
+  {% if logins %}
+  <div class="card">
+    <h2 style="margin-top:0">登录审计（最近 {{ logins|length }} 条）</h2>
+    <table>
+      <thead><tr><th>时间</th><th>IP</th><th>结果</th><th>备注</th></tr></thead>
+      <tbody>
+        {% for l in logins %}
+        <tr>
+          <td class="mono">{{ l.ts[:19] }}</td>
+          <td class="mono">{{ l.ip }}</td>
+          <td>{% if l.success %}<span style="color:#34c759">成功</span>{% else %}<span style="color:#ff3b30">失败</span>{% endif %}</td>
+          <td>{{ l.note }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // 会话走 HttpOnly Cookie（自动随请求带上），无需在 JS 里持有 master key
+    const headers = { 'Content-Type': 'application/json' };
+
+    function toast(msg, err) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.className = 'toast show' + (err ? ' err' : '');
+      setTimeout(() => t.className = 'toast', 2500);
+    }
+
+    function copyText(text, msg) {
+      navigator.clipboard.writeText(text).then(() => toast(msg || '已复制'));
+    }
+
+    async function createKey() {
+      const user = document.getElementById('user').value.trim();
+      const alias = document.getElementById('alias').value.trim();
+      const budget = document.getElementById('budget').value;
+      const rpm = document.getElementById('rpm').value;
+      const backends = [...document.querySelectorAll('.be:checked')].map(c => c.value);
+      if (!user) return toast('请填用户名', true);
+      if (!backends.length) return toast('至少选一个后端', true);
+
+      const btn = document.getElementById('createBtn');
+      btn.disabled = true; btn.textContent = '创建中…';
+      try {
+        const r = await fetch('/manage/api/new', {
+          method: 'POST', headers,
+          body: JSON.stringify({ user, alias, backend: backends.join(','), max_budget: budget, rpm })
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || '创建失败');
+        const key = d.key;
+        document.getElementById('newKey').textContent = key;
+        const base = location.origin;
+        document.getElementById('ccConfig').textContent =
+          `// ~/.claude/settings.json\n{\n  "env": {\n    "ANTHROPIC_BASE_URL": "${base}",\n    "ANTHROPIC_AUTH_TOKEN": "${key}"\n  }\n}`;
+        document.getElementById('oaiConfig').textContent =
+          `base_url = "${base}/v1"\napi_key  = "${key}"\n# 发 model=${backends[0]} 选后端`;
+        document.getElementById('result').style.display = 'block';
+        document.getElementById('result').scrollIntoView({ behavior: 'smooth' });
+        toast('创建成功');
+        setTimeout(() => location.reload(), 4000);
+      } catch (e) { toast(e.message, true); }
+      finally { btn.disabled = false; btn.textContent = '创建 Key'; }
+    }
+
+    async function deleteKey(hash, alias) {
+      if (!confirm(`确认删除 key「${alias}」？此操作不可撤销。`)) return;
+      try {
+        const r = await fetch('/manage/api/delete', { method: 'POST', headers, body: JSON.stringify({ key: hash }) });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || '删除失败');
+        toast('已删除 ' + alias);
+        document.getElementById('row-' + hash.slice(0, 12))?.remove();
+      } catch (e) { toast(e.message, true); }
+    }
+
+    function toggleEdit(id, currentBackend) {
+      const row = document.getElementById('edit-' + id);
+      row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+      // 预勾选当前后端
+      if (row.style.display === 'table-row' && currentBackend) {
+        currentBackend.split(',').map(s => s.trim()).forEach(b => {
+          const cb = document.querySelector('.ebe-' + id + '[value="' + b + '"]');
+          if (cb) cb.checked = true;
+        });
+      }
+    }
+
+    async function saveEdit(id, hash) {
+      const backends = [...document.querySelectorAll('.ebe-' + id + ':checked')].map(c => c.value);
+      const budget = document.getElementById('edit-budget-' + id).value;
+      const rpm = document.getElementById('edit-rpm-' + id).value;
+      if (!backends.length && !budget && !rpm) return toast('没改动', true);
+      try {
+        const body = { key: hash };
+        if (backends.length) body.backend = backends.join(',');
+        if (budget !== '') body.max_budget = parseFloat(budget) || 0;
+        if (rpm) body.rpm = parseInt(rpm);
+        const r = await fetch('/manage/api/update', { method: 'POST', headers, body: JSON.stringify(body) });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || '更新失败');
+        toast('已更新，刷新中...');
+        setTimeout(() => location.reload(), 800);
+      } catch (e) { toast(e.message, true); }
+    }
+  </script>
+</body>
+</html>

@@ -102,14 +102,65 @@ docker compose up -d          # 重启 litellm
 | Per-key 预算上限 | ⬜ 需在 UI 操作 | Admin UI -> Keys |
 | Per-key 速率限制 | ⬜ 需在 UI 操作 | Admin UI -> Keys |
 | Per-key 模型限制 | ⬜ 需在 UI 操作 | Admin UI -> Keys |
-| HTTPS（远程访问时） | ⬜ 未配置 | 需加反向代理 |
+| HTTPS（远程访问时） | ⬜ 未配置 | 需加反向代理（PaaS 默认提供） |
 
 ---
 
-## 四、Master Key 说明
+## 四、线上部署（PaaS：Railway/Render/Fly）
 
-网关的 Master Key（`ARK_API_KEY`）是管理员级密钥，拥有全部权限。**不要**分发给终端用户。
+线上用单容器镜像（`Dockerfile`），Postgres 用平台托管实例，key 管理走 `/manage/` 自建管理页（不依赖 CLI）。
 
-终端用户使用通过 `./keys.sh new` 创建的虚拟 key（`sk-...`），这些 key 受预算、速率、模型限制约束。
+### 4.1 必填环境变量（平台 UI 配置）
+
+| 变量 | 说明 |
+|---|---|
+| `DATABASE_URL` | 托管 Postgres 连接串（如 `postgresql://user:pass@host:5432/db`） |
+| `GATEWAY_MASTER_KEY` | 网关管理密钥，**单独随机生成**（如 `sk-gw-xxx`），勿复用 provider key |
+| `ARK_API_KEY` | 火山 ark coding plan token |
+| `CLAUDE_CODE_KEY` | 公司 Claude 网关 key |
+| `Z_AI_API_KEY` | 智谱 BigModel key（vision hook 视觉模型默认也用） |
+| `UI_USERNAME` / `UI_PASSWORD` | Admin UI 登录凭据，密码务必强 |
+| `CLAUDE_CODE_KEY_1` / `CLAUDE_CODE_KEY_2` | 可选，多 key 隔离用量（claude_1/claude_2 后端） |
+| `PUBLIC_BASE_URL` | 可选，对外公开地址（管理页展示给客户端的 BASE_URL） |
+
+### 4.2 HTTPS
+
+PaaS（Railway/Render/Fly）默认提供 TLS 终止——平台给你一个 `https://xxx` 域名，到容器的流量平台已加密。**无需自配证书**。
+
+直接用平台给的 HTTPS 域名作为客户端的 BASE_URL，不要用 http://。
+
+### 4.3 IP 白名单（线上建议去掉）
+
+线上 PaaS 部署建议**去掉** `ip_allowlist`（或设为允许全部），原因：
+- PaaS 的入站 IP 不固定（平台代理转发），白名单可能误拦
+- HTTPS + master key + per-key 预算已构成足够保护
+
+如确实要限制特定来源 IP，在 `backends.yaml` 的 `ip_allowlist` 加上平台代理网段。
+
+### 4.4 部署流程
+
+```bash
+# 1. 平台（如 Railway）导入仓库，自动用根目录 Dockerfile 构建单容器镜像
+# 2. 平台 UI 配置 4.1 的环境变量
+# 3. 平台分配 HTTPS 域名
+# 4. 浏览器打开 https://<域名>/manage/?k=<GATEWAY_MASTER_KEY>
+#    → 创建 key（选后端、设预算）→ 拿到 sk-... 客户端 key
+# 5. 客户端用 https://<域名> 作 BASE_URL + 创建的 key 接入
+```
+
+### 4.5 本地验证镜像（不影响线上）
+
+```bash
+./scripts/verify-image.sh        # 用 4002 端口 + 隔离 db 跑完整验证，跑完自动清理
+./scripts/verify-image.sh --keep # 保留容器排查
+```
+
+---
+
+## 五、Master Key 说明
+
+网关的 Master Key（`GATEWAY_MASTER_KEY`）是管理员级密钥，拥有全部权限。**不要**分发给终端用户。
+
+终端用户使用通过 `./keys.sh new`（本地）或 `/manage/`（线上）创建的虚拟 key（`sk-...`），这些 key 受预算、速率、模型限制约束。
 
 Master Key 本身不受 IP 白名单限制（它走内部认证），但 UI 登录和 API 调用仍受 IP 白名单控制。

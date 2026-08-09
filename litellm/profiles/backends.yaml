@@ -97,8 +97,8 @@ litellm_settings:
   num_retries: 2
 
 general_settings:
-  database_url: postgresql://litellm:litellm@db:5432/litellm
-  master_key: os.environ/ARK_API_KEY   # 网关访问密钥固定用 ARK_API_KEY，与后端 provider 解耦
+  database_url: os.environ/DATABASE_URL   # 线上=托管 PG 连接串；本地 .env 里 DATABASE_URL 指向 compose 的 pg
+  master_key: os.environ/GATEWAY_MASTER_KEY   # 网关管理密钥，与 provider key 解耦（本地 .env 设等于 ARK 值即可）
   store_model_in_db: true                # Admin UI Logs 页查看 request/response 详情
   store_prompts_in_spend_logs: true      # 把请求 messages/响应存进 DB
   forward_client_headers_to_llm_api: true   # 转发 anthropic-beta 等 header（skills/ToolSearch 依赖）
