@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# 提交身份护栏：本工程所有提交必须是 Biwei Lai <biwei.lai@qq.com>
+#
+# 启用方式（每个新 clone 执行一次）：
+#   git config core.hooksPath .githooks
+#
+# 该钩子只在本工程生效，不影响其它工程。
+
+set -euo pipefail
+
+EXPECT_NAME="Biwei Lai"
+EXPECT_EMAIL="biwei.lai@qq.com"
+
+# 取本次提交实际会用的身份（GIT_AUTHOR_* 环境变量优先，其次 git config）
+actual_name="${GIT_AUTHOR_NAME:-$(git config user.name || true)}"
+actual_email="${GIT_AUTHOR_EMAIL:-$(git config user.email || true)}"
+
+if [ "$actual_name" != "$EXPECT_NAME" ] || [ "$actual_email" != "$EXPECT_EMAIL" ]; then
+  cat >&2 <<EOF
+
+✗ 提交身份不符合本工程要求，已阻止提交。
+
+  期望: $EXPECT_NAME <$EXPECT_EMAIL>
+  实际: $actual_name <$actual_email>
+
+修复（只改本工程，不影响全局）：
+  git config --local user.name  "$EXPECT_NAME"
+  git config --local user.email "$EXPECT_EMAIL"
+
+EOF
+  exit 1
+fi

@@ -1,0 +1,6 @@
+# 本工程统一提交身份：Biwei Lai <biwei.lai@qq.com>
+# 即使某次提交误用了其它 name/email，git log/shortlog/blame 也会显示为规范身份。
+Biwei Lai <biwei.lai@qq.com> <880723@nd.com>
+Biwei Lai <biwei.lai@qq.com> 赖碧威 <880723@nd.com>
+Biwei Lai <biwei.lai@qq.com> Biwei.Lai <biwei.lai@qq.com>
+Biwei Lai <biwei.lai@qq.com> <41898282+github-actions[bot]@users.noreply.github.com>

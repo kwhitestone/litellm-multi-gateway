@@ -25,6 +25,12 @@ This project aims to be a practical, no-nonsense gateway for multi-backend LLM r
 ```bash
 git clone https://github.com/kwhitestone/litellm-multi-gateway.git
 cd litellm-multi-gateway
+
+# 提交身份（本工程统一身份，只影响本仓库，不动全局配置）
+git config user.name  "Biwei Lai"
+git config user.email "biwei.lai@qq.com"
+git config core.hooksPath .githooks   # 启用 pre-commit 身份校验
+
 cp .env.example .env
 # Fill in at least one provider key
 
