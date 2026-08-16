@@ -29,9 +29,9 @@ backends:
     key_env: ARK_API_KEY
     needs_vision: true
     models:
-      glm-5.2: { litellm_model: anthropic/glm-5.2 }
+      glm: { litellm_model: anthropic/glm-5.2 }
     mapping:
-      "*": glm-5.2          # 所有 claude 名 -> ark-glm-5.2
+      "*": glm          # 所有 claude 名 -> ark-glm
 
   # ===== claude（公司网关，原生多模态，图片原图透传）=====
   # mapping 省略 → identity：claude-sonnet-5 映射到 claude-sonnet-5（名即真名）
@@ -83,9 +83,9 @@ backends:
     key_env: Z_AI_API_KEY
     needs_vision: true
     models:
-      glm-5.2: { litellm_model: anthropic/glm-5.2 }
+      glm: { litellm_model: anthropic/glm-5.3 }
     mapping:
-      "*": glm-5.2          # 所有 claude 名 -> zai-glm-5.2
+      "*": glm         # 所有 claude 名 -> zai-glm
 
 # -----------------------------------------------------------------------------
 # 以下与后端无关，gen-config 时原样拼进 multi.yaml 尾部
