@@ -92,7 +92,7 @@ backends:
 # -----------------------------------------------------------------------------
 litellm_settings:
   callbacks: [hooks.vision_hook.VisionPreRequestHook]   # vision：按模型 needs_vision 转图/透传
-  drop_params: false   # claude 后端需原样转发 thinking+effort；ark/zai 若报参数错再单独处理
+  drop_params: true   # 丢弃后端不支持的参数（如 glm 不支持 reasoning_effort）。claude 模型在 supported_openai_params 里声明了 reasoning_effort/thinking，不会被误丢
   request_timeout: 600
   num_retries: 2
 

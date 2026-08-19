@@ -130,13 +130,13 @@ if general_settings and general_settings.get("forward_client_headers_to_llm_api"
 
 ### 3. LiteLLM 丢弃后端不支持的参数
 
-**症状：** 日志中出现 `Dropping adaptive thinking/effort for model=xxx`。
+**症状：** 日志中出现 `Dropping adaptive thinking/effort for model=xxx`，或 `/v1/responses` 端点报 `UnsupportedParamsError: anthropic does not support parameters: ['reasoning_effort']`。
 
-**根因：** LiteLLM 的 `drop_params` 机制会自动丢弃后端不支持的参数。`backends.yaml` 里 `drop_params: false` 时保留所有参数，但部分参数仍会被 AnthropicConfig 的 `_maybe_drop_speed_param` 等方法丢弃。
+**根因：** LiteLLM 的 `drop_params` 机制会自动丢弃后端不支持的参数。`drop_params: false` 时保留所有参数，遇到不支持的参数（如 glm 不支持 `reasoning_effort`）就抛 `UnsupportedParamsError`。
 
-**排查：** 查日志中的 `WARNING: transformation.py` 行。
+**排查：** 查日志中的 `WARNING: transformation.py` 行，或 `UnsupportedParamsError`。
 
-**影响：** 对 ark/zai（glm-5.2）等不支持的参数（thinking、effort）会被丢弃，不影响功能。但如果 `drop_params: true` 可能会丢弃更多必要参数。
+**影响：** `drop_params: true` 只丢弃后端**真正不支持**的参数。claude 模型在 `get_supported_openai_params` 里声明了 `reasoning_effort`/`thinking`，所以不会被误丢；glm 模型没声明这些，会被丢弃。这是安全且期望的行为。注意：`/v1/responses` 端点只读全局 `litellm.drop_params`，不读 per-model 的 `drop_params`，所以必须用全局 `drop_params: true` 才能修复 `/v1/responses` 的报错。
 
 ### 4. beta header 被 LiteLLM 过滤掉
 
