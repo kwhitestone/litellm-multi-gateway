@@ -110,13 +110,17 @@ def gen_multi_yaml(cfg: dict) -> str:
     ]
     for backend, b in cfg["backends"].items():
         nv = b.get("needs_vision", False)
+        st = b.get("strip_thinking", False)
         lines.append(f"  # ===== {backend}（needs_vision={str(nv).lower()}）=====")
         for model, spec in b["models"].items():
             mn = model_name_for(backend, model)
             lm = spec["litellm_model"]
             api_base = b["api_base"]
             key_env = b["key_env"]
-            lines.append(f"  - model_name: {mn}   # needs_vision: {str(nv).lower()}")
+            lines.append(
+                f"  - model_name: {mn}   # needs_vision: {str(nv).lower()} "
+                f"strip_thinking: {str(st).lower()}"
+            )
             lines.append(
                 f"    litellm_params: {{ model: {lm}, api_base: {api_base}, "
                 f"api_key: os.environ/{key_env} }}"

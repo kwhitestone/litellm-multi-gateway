@@ -28,8 +28,9 @@ backends:
     api_base: https://ark.cn-beijing.volces.com/api/coding
     key_env: ARK_API_KEY
     needs_vision: true
+    strip_thinking: true   # ark 不认 thinking.type=disabled（Claude Code 默认会发），剥掉；zai/claude 不需要
     models:
-      glm: { litellm_model: anthropic/glm-5.2 }
+      glm: { litellm_model: anthropic/glm-5.3 }
     mapping:
       "*": glm          # 所有 claude 名 -> ark-glm
 

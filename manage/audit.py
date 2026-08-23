@@ -1,17 +1,11 @@
 """
-manage/audit.py — 管理页登录审计。
+manage/audit.py - 管理页登录审计。
 
 双重记录：
   1) stdout（docker logs 实时看，PaaS 自动采集）
-  2) Postgres 表 manage_login_audit（历史可查，结构见 _ENSURE_TABLE_SQL）
+  2) Postgres 表 manage.manage_login_audit（历史可查，结构由 pgschema.ensure 建）
 
-表结构（自动建，幂等）：
-  id           SERIAL PK
-  ts           TIMESTAMPTZ（事件时间，UTC）
-  ip           TEXT（来源 IP）
-  success      BOOLEAN（登录成功/失败）
-  user_agent   TEXT（浏览器标识）
-  note         TEXT（备注，如 'session expired' / 'logout'）
+表在独立 schema `manage`（见 pgschema.py 说明：避免被 prisma db push 当漂移 DROP）。
 """
 from __future__ import annotations
 
@@ -19,20 +13,11 @@ import os
 import sys
 from typing import Optional
 
+from . import pgschema
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
-_ENSURE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS manage_login_audit (
-    id BIGSERIAL PRIMARY KEY,
-    ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    ip TEXT,
-    success BOOLEAN NOT NULL,
-    user_agent TEXT,
-    note TEXT
-);
-"""
-
-_table_ready = False
+_TABLE = f'"{pgschema.SCHEMA}".manage_login_audit'
 
 
 def _log_stdout(success: bool, ip: str, ua: str, note: str) -> None:
@@ -41,17 +26,6 @@ def _log_stdout(success: bool, ip: str, ua: str, note: str) -> None:
         f"[manage_audit] {status} ip={ip or '-'} ua={ua[:60] or '-'} note={note or '-'}",
         file=sys.stderr, flush=True,
     )
-
-
-def _ensure_table(cursor) -> None:
-    global _table_ready
-    if _table_ready:
-        return
-    try:
-        cursor.execute(_ENSURE_TABLE_SQL)
-        _table_ready = True
-    except Exception:
-        pass  # DB 不可用时审计降级为只写日志，不阻塞登录流程
 
 
 def log_login(success: bool, ip: Optional[str] = None, user_agent: Optional[str] = None,
@@ -65,13 +39,13 @@ def log_login(success: bool, ip: Optional[str] = None, user_agent: Optional[str]
         return
     try:
         # psycopg2 litellm 镜像自带；失败静默降级到只写日志
+        pgschema.ensure()  # 幂等：schema/表不存在时补建
         import psycopg2
         conn = psycopg2.connect(DATABASE_URL)
         try:
             with conn.cursor() as cur:
-                _ensure_table(cur)
                 cur.execute(
-                    "INSERT INTO manage_login_audit (ip, success, user_agent, note) VALUES (%s,%s,%s,%s)",
+                    f"INSERT INTO {_TABLE} (ip, success, user_agent, note) VALUES (%s,%s,%s,%s)",
                     (ip, success, ua, note),
                 )
             conn.commit()
@@ -86,13 +60,13 @@ def recent_logins(limit: int = 20) -> list[dict]:
     if not DATABASE_URL:
         return []
     try:
+        pgschema.ensure()
         import psycopg2
         conn = psycopg2.connect(DATABASE_URL)
         try:
             with conn.cursor() as cur:
-                _ensure_table(cur)
                 cur.execute(
-                    "SELECT ts, ip, success, note FROM manage_login_audit "
+                    f"SELECT ts, ip, success, note FROM {_TABLE} "
                     "ORDER BY id DESC LIMIT %s", (limit,)
                 )
                 rows = cur.fetchall()

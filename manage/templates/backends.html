@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>后端配置 · 网关管理</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+           background: #f5f5f7; color: #1d1d1f; padding: 24px; line-height: 1.5; }
+    h1 { font-size: 22px; margin-bottom: 4px; }
+    h2 { font-size: 16px; margin: 24px 0 10px; color: #6e6e73; font-weight: 600; }
+    .sub { color: #86868b; font-size: 13px; margin-bottom: 20px; }
+    a { color: #0071e3; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .card { background: #fff; border-radius: 12px; padding: 20px 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px; }
+    textarea { width: 100%; height: 60vh; padding: 14px 16px; border: 1px solid #d2d2d7;
+               border-radius: 8px; font-family: "SF Mono", "Fira Code", Consolas, monospace;
+               font-size: 12.5px; line-height: 1.6; background: #fafafa; color: #1d1d1f;
+               resize: vertical; tab-size: 2; }
+    textarea:focus { outline: none; border-color: #0071e3; box-shadow: 0 0 0 3px rgba(0,113,227,.15); }
+    button { background: #0071e3; color: #fff; border: none; padding: 10px 24px; border-radius: 980px;
+             font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 12px; }
+    button:hover { background: #0077ed; }
+    button:disabled { background: #d2d2d7; cursor: not-allowed; }
+    button.secondary { background: #e5e5ea; color: #1d1d1f; }
+    button.secondary:hover { background: #d2d2d7; }
+    .meta { font-size: 12px; color: #86868b; margin: 8px 0 0; }
+    .meta .ok { color: #34c759; font-weight: 600; }
+    .meta .warn { color: #ff9500; font-weight: 600; }
+    .toast { position: fixed; top: 20px; right: 20px; background: #1d1d1f; color: #fff; padding: 10px 18px;
+             border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .3s; z-index: 999;
+             max-width: 480px; white-space: pre-wrap; }
+    .toast.show { opacity: 1; }
+    .toast.err { background: #ff3b30; }
+    .toast.ok { background: #34c759; }
+  </style>
+</head>
+<body>
+  <h1>⚙️ 后端配置（backends.yaml）
+    <a href="/manage/" style="float:right;font-size:13px">← 返回 Key 管理</a>
+  </h1>
+  <p class="sub">配置存储在数据库，保存后<strong>重启容器生效</strong>。保存前会用生成器校验（YAML 语法 / mapping 指向 / 缺后端等）。改动 provider key 不在这里——那是环境变量。</p>
+
+  <div class="card">
+    {% if db_ok %}
+    <p class="meta">
+      <span class="ok">● 存储已连接</span>
+      {% if updated %}· 最后修改：{{ updated[:19] }}{% else %}· 尚未初始化（首次保存将写入数据库）{% endif %}
+    </p>
+    {% else %}
+    <p class="meta"><span class="warn">● 数据库不可用</span> · 下方展示的是容器当前在用的文件，保存会失败</p>
+    {% endif %}
+    <textarea id="content" spellcheck="false">{{ content }}</textarea>
+    <button id="saveBtn" onclick="save()">校验并保存</button>
+    <button class="secondary" onclick="reload()">放弃修改</button>
+    <p class="meta">保存成功后需要重启容器：自建主机 <span class="mono">docker restart gateway</span>；PaaS 平台点 Restart。</p>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const headers = { 'Content-Type': 'application/json' };
+    const original = {{ content | tojson }};
+
+    function toast(msg, cls) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.className = 'toast show ' + (cls || '');
+      setTimeout(() => t.className = 'toast', 6000);
+    }
+
+    function reload() { location.reload(); }
+
+    async function save() {
+      const content = document.getElementById('content').value;
+      if (content === original) return toast('内容没有改动', 'err');
+      if (!confirm('保存后需重启容器才生效，确认保存？')) return;
+      const btn = document.getElementById('saveBtn');
+      btn.disabled = true; btn.textContent = '校验中…';
+      try {
+        const r = await fetch('/manage/api/backends', {
+          method: 'POST', headers, body: JSON.stringify({ content })
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || '保存失败');
+        toast('✓ 已保存。重启容器后生效', 'ok');
+        setTimeout(() => location.reload(), 2000);
+      } catch (e) { toast(e.message, 'err'); }
+      finally { btn.disabled = false; btn.textContent = '校验并保存'; }
+    }
+  </script>
+</body>
+</html>

@@ -75,6 +75,7 @@ _cache: dict[str, str] = {}
 class _VisionConfig(NamedTuple):
     per_model: Dict[str, bool]  # model_name 别名 / litellm_params.model -> needs_vision
     global_default: bool        # 无 per-model 标记时的回退（头部 native_vision）
+    per_strip: Dict[str, bool]  # model key -> strip_thinking（后写的覆盖，避免多后端共享 model 时串味）
 
     def needs(self, model: str) -> bool:
         if not model:
@@ -86,13 +87,18 @@ class _VisionConfig(NamedTuple):
             return self.per_model[model.split("/", 1)[1]]
         return self.global_default
 
+    def strip_thinking(self, model: str) -> bool:
+        key = model if model in self.per_strip else (
+            model.split("/", 1)[1] if "/" in model and model.split("/", 1)[1] in self.per_strip else None
+        )
+        return bool(key and self.per_strip[key])
 
-def _parse_bool_after_colon(s: str) -> bool:
-    """从 '... needs_vision: true  # 注释' 提取布尔值。按关键字定位，避免行内其它冒号干扰。"""
-    for key in ("needs_vision:", "native_vision:"):
-        if key in s:
-            rest = s.split(key, 1)[1].strip().split()[0].lower()
-            return rest.startswith("true")
+
+def _parse_bool_after_colon(s: str, key: str) -> bool:
+    """从 '... <key>: true  # 注释' 提取指定 key 的布尔值。按关键字定位，避免行内其它冒号干扰。"""
+    if key in s:
+        rest = s.split(key, 1)[1].strip().split()[0].lower()
+        return rest.startswith("true")
     return False
 
 
@@ -111,32 +117,37 @@ def _load_vision_config() -> _VisionConfig:
 
     global_default = False
     per_model: Dict[str, bool] = {}
+    per_strip: Dict[str, bool] = {}
     try:
         with open(CONFIG_PATH, encoding="utf-8") as f:
             lines = f.readlines()
     except FileNotFoundError:
         _log(f"config.yaml 未找到({CONFIG_PATH})，默认 needs_vision=false（透传）")
-        _config_cache = _VisionConfig(per_model, global_default)
+        _config_cache = _VisionConfig(per_model, global_default, per_strip)
         return _config_cache
 
     in_model_list = False
     cur_nv: Optional[bool] = None      # 当前条目的 needs_vision（None=未标记）
+    cur_st = False                     # 当前条目的 strip_thinking
     cur_model: Optional[str] = None    # 当前条目的 litellm_params.model 字段
     cur_alias: Optional[str] = None    # 当前条目的 model_name（proxy 层 hook 看到的）
 
     def _commit() -> None:
-        # 别名和后端 model 都注册，两个 hook 各自的 model 形态都能命中
+        # 别名和后端 model 都注册，两个 hook 各自的 model 形态都能命中。
+        # 用覆盖写而非只加 True：多个后端共用同一 litellm_params.model 时（如 ark/zai
+        # 都是 anthropic/glm-5.3），后配置的 strip_thinking=false 要能覆盖先前的 true
         if cur_nv is None:
             return
         for key in (cur_alias, cur_model):
             if key:
                 per_model[key] = cur_nv
+                per_strip[key] = cur_st
 
     for line in lines:
         stripped = line.strip()
         # 头部全局标记（model_list 之前）
         if not in_model_list and stripped.startswith("#") and "native_vision:" in stripped:
-            global_default = _parse_bool_after_colon(stripped)
+            global_default = _parse_bool_after_colon(stripped, "native_vision:")
         if stripped == "model_list:":
             in_model_list = True
             continue
@@ -144,24 +155,28 @@ def _load_vision_config() -> _VisionConfig:
         # 不能用 stripped（litellm_params: 行 stripped 后也顶格，但它在 model_list 内）
         if in_model_list and stripped and not line.startswith((" ", "\t")) and not stripped.startswith("#"):
             _commit()   # 段结束前提交最后一条，否则最后一个模型丢标记
-            cur_nv, cur_model, cur_alias = None, None, None
+            cur_nv, cur_st, cur_model, cur_alias = None, False, None, None
             in_model_list = False
         if not in_model_list:
             continue
         # 新条目开始：先把上一条提交
         if stripped.startswith("- model_name:"):
             _commit()
-            cur_nv, cur_model, cur_alias = None, None, None
-            # 行内 needs_vision 注释
+            cur_nv, cur_st, cur_model, cur_alias = None, False, None, None
+            # 行内 needs_vision / strip_thinking 注释
             if "needs_vision:" in stripped:
-                cur_nv = _parse_bool_after_colon(stripped)
+                cur_nv = _parse_bool_after_colon(stripped, "needs_vision:")
+            if "strip_thinking:" in stripped:
+                cur_st = _parse_bool_after_colon(stripped, "strip_thinking:")
             # model_name 别名（去掉行尾 # 注释）
             alias = stripped.split("model_name:", 1)[1].split("#")[0].strip().strip('"').strip("'")
             if alias:
                 cur_alias = alias
         elif cur_model is None and "needs_vision:" in stripped and stripped.startswith("#"):
             # model_name 下一行的独立 needs_vision 注释
-            cur_nv = _parse_bool_after_colon(stripped)
+            cur_nv = _parse_bool_after_colon(stripped, "needs_vision:")
+            if "strip_thinking:" in stripped:
+                cur_st = _parse_bool_after_colon(stripped, "strip_thinking:")
         # 提取 litellm_params.model 字段（flow 或多行都可能有 "model: xxx"）
         if "model:" in stripped and "model_name:" not in stripped:
             # 取 model: 后的值，去掉 provider 前缀的引号/逗号
@@ -170,7 +185,7 @@ def _load_vision_config() -> _VisionConfig:
                 cur_model = val
     # 提交最后一条（config 以 model_list 结尾、没有后续顶格段时）
     _commit()
-    _config_cache = _VisionConfig(per_model, global_default)
+    _config_cache = _VisionConfig(per_model, global_default, per_strip)
     _log(f"vision config 已加载: {len(per_model)} 个 model key, global_default={global_default}")
     return _config_cache
 
@@ -323,7 +338,15 @@ def _strip_cache_ttl(obj: Any) -> None:
 async def _transform(model: str, messages: List, container: Dict, where: str) -> Dict:
     """两个 hook 共用的改写逻辑。messages in-place 改（下游 handler 持有原 list 引用），
     container 是承载 system/tools 的 dict（pre_request 是 kwargs，pre_call 是 data）。"""
-    needs_vision = _load_vision_config().needs(model)
+    cfg = _load_vision_config()
+    needs_vision = cfg.needs(model)
+
+    # strip_thinking 后端（如 ark）：剥掉 thinking/reasoning 参数。
+    # Claude Code 不开思考时发 thinking={"type":"disabled"}，透传给不认该值的
+    # anthropic 兼容端点（方舟 GLM）会 400 InvalidParameter。
+    if cfg.strip_thinking(model):
+        for key in ("thinking", "reasoning", "thinking_budget"):
+            container.pop(key, None)
 
     # 剥 cache_control ttl（对所有模型）。只走 messages/system/tools，
     # 不整体递归 container：pre_call 的 data 里挂着 metadata/logging_obj 等大对象。

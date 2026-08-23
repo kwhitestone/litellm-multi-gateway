@@ -49,7 +49,29 @@ def _ensure_db_migrated() -> None:
 
 
 # 0. 首次部署迁移 db（在 litellm 连库前）
+# 先把自建表（登录审计/backends 存储挪进独立 schema manage）从 public 清走，
+# 否则 prisma db push 把它们当漂移表 DROP--有数据时会因 data-loss 警告整体失败，
+# LiteLLM 升级的 schema 变更就永远应用不上。
+if os.environ.get("DATABASE_URL"):
+    try:
+        from manage.pgschema import ensure as _ensure_manage_schema
+        _ensure_manage_schema()
+    except Exception as exc:
+        print(f"[server] 自建表 schema 准备失败({exc!r})，继续启动", flush=True)
 _ensure_db_migrated()
+
+# 0.5 backends.yaml 物化：PG 里存的是真相源（gateway_backends 表），拉下来覆盖
+# /app/backends.yaml 并重新生成 config.yaml。首次部署把镜像内置版入库；DB 不可达
+# 回退镜像内置版。必须在 import litellm 之前（config 在 import 时加载）。
+import sys as _sys
+if "/app" not in _sys.path:
+    _sys.path.insert(0, "/app")
+if os.environ.get("DATABASE_URL"):
+    try:
+        from manage.backends_store import load_on_boot
+        load_on_boot()
+    except Exception as exc:
+        print(f"[server] backends 物化失败({exc!r})，用镜像内置版", flush=True)
 
 # 1. import LiteLLM 的 app（会触发 config.yaml 加载 + 路由注册）
 from litellm.proxy.proxy_server import app  # noqa: E402

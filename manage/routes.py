@@ -8,6 +8,8 @@ manage/routes.py — 自建管理页路由。
   - POST /manage/logout      登出（清 Cookie + 审计）
   - POST /manage/api/new     创建 key（需登录）
   - POST /manage/api/delete  删除 key（需登录）
+  - GET  /manage/backends    查看/编辑 backends.yaml（PG 存储，需登录）
+  - POST /manage/api/backends 保存 backends.yaml（校验后入库，需登录，重启生效）
 
 认证：会话 Cookie（HMAC 签名，滑动过期 12h），master key 只在登录时验一次，
 之后全程不出现在 URL/响应里。登录有审计（stdout + postgres）。
@@ -26,7 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from . import auth, audit
+from . import auth, audit, backends_store
 
 router = APIRouter(prefix="/manage")
 
@@ -297,6 +299,50 @@ async def update_key(request: Request) -> JSONResponse:
     if r.status_code != 200:
         raise HTTPException(500, f"LiteLLM 更新失败: {r.text}")
     resp = JSONResponse(r.json())
+    auth.renew_session(resp)
+    return resp
+
+
+# ---------- backends.yaml 编辑（PG 存储，重启生效） ----------
+
+@router.get("/backends", response_class=HTMLResponse,
+            dependencies=[Depends(auth.require_session)])
+async def backends_page(request: Request):
+    """backends.yaml 编辑页。内容来自 PG（backends_store），DB 不可用展示当前文件。"""
+    stored = backends_store.fetch()
+    if stored is None:
+        # DB 不可用：退回展示容器里实际在用的文件（管理页 routes 实时读它）
+        content = _BACKENDS_PATH.read_text(encoding="utf-8")
+        updated = None
+        db_ok = False
+    else:
+        content = stored["content"]
+        updated = stored["updated_at"]
+        db_ok = True
+    resp = templates.TemplateResponse(request, "backends.html", {
+        "content": content,
+        "updated": updated,
+        "db_ok": db_ok,
+    })
+    auth.renew_session(resp)
+    return resp
+
+
+@router.post("/api/backends", dependencies=[Depends(auth.require_session)])
+async def save_backends(request: Request) -> JSONResponse:
+    """保存 backends.yaml。body: {content: <yaml 全文>}
+    校验（gen_config 试生成 config.yaml）通过才入库；重启容器后生效。"""
+    body = await request.json()
+    content = body.get("content") or ""
+    if not content.strip():
+        raise HTTPException(400, "内容为空")
+    try:
+        backends_store.save(content)
+    except ValueError as exc:
+        raise HTTPException(400, f"校验失败: {exc}")
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc))
+    resp = JSONResponse({"ok": True})
     auth.renew_session(resp)
     return resp
 
