@@ -10,6 +10,8 @@ manage/routes.py — 自建管理页路由。
   - POST /manage/api/delete  删除 key（需登录）
   - GET  /manage/backends    查看/编辑 backends.yaml（PG 存储，需登录）
   - POST /manage/api/backends 保存 backends.yaml（校验后入库，需登录，重启生效）
+  - GET  /manage/test       上游测试页：直连各后端 / 经网关对比，完整展示返回（需登录）
+  - POST /manage/api/test   发一条测试消息到指定后端+模型（需登录）
 
 认证：会话 Cookie（HMAC 签名，滑动过期 12h），master key 只在登录时验一次，
 之后全程不出现在 URL/响应里。登录有审计（stdout + postgres）。
@@ -19,6 +21,7 @@ manage/routes.py — 自建管理页路由。
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -347,7 +350,116 @@ async def save_backends(request: Request) -> JSONResponse:
     return resp
 
 
-# ---------- 辅助：调 LiteLLM key 管理 API ----------
+# ---------- 上游测试（直连 vs 经网关，完整展示返回） ----------
+
+def _backend_test_targets() -> dict[str, dict[str, Any]]:
+    """{backend: {models: [model_name...], api_base, key_env, native: {model_name: 原生模型名}}}，
+    model_name 为 litellm 路由名（gen_config 命名），native 为直连时该发给上游的真实模型名
+    （litellm_model 去 provider 前缀：anthropic/glm-5.3 -> glm-5.3）。"""
+    gc = _load_gen_config()
+    cfg = gc.load_backends(_BACKENDS_PATH)
+    out: dict[str, dict[str, Any]] = {}
+    for name, spec in cfg["backends"].items():
+        native: dict[str, str] = {}
+        for m, mspec in spec.get("models", {}).items():
+            litellm_model = mspec.get("litellm_model", m)
+            native[gc.model_name_for(name, m)] = litellm_model.split("/", 1)[-1]
+        out[name] = {
+            "models": sorted(native.keys()),
+            "native": native,
+            "api_base": spec.get("api_base", ""),
+            "key_env": spec.get("key_env", ""),
+        }
+    return out
+
+
+@router.get("/test", response_class=HTMLResponse,
+            dependencies=[Depends(auth.require_session)])
+async def test_page(request: Request):
+    """上游测试页。核心是直连 vs 经网关对比：直连挂、网关通 -> 网关配置问题；反之亦然。"""
+    resp = templates.TemplateResponse(request, "test.html", {
+        "targets": _backend_test_targets(),
+    })
+    auth.renew_session(resp)
+    return resp
+
+
+@router.post("/api/test", dependencies=[Depends(auth.require_session)])
+async def api_test(request: Request) -> JSONResponse:
+    """发一条最小测试消息。body: {backend, model, mode}
+    mode=direct  容器内直连后端 api_base（不经 litellm，用 key_env 的真实 key）
+    mode=gateway 经本网关 /v1/messages（用 master key，走完整 litellm 链路）
+    返回完整上游响应（状态码/headers/body），错误也完整展示，方便排障。"""
+    body = await request.json()
+    backend = (body.get("backend") or "").strip()
+    model = (body.get("model") or "").strip()
+    mode = (body.get("mode") or "direct").strip()
+    prompt = (body.get("prompt") or "hi").strip() or "hi"
+    if backend not in _backends():
+        raise HTTPException(400, f"未知后端: {backend}")
+
+    started = time.monotonic()
+    if mode == "gateway":
+        payload = {"model": model or backend, "max_tokens": 64,
+                   "messages": [{"role": "user", "content": prompt}]}
+        r = await _relay_request(
+            "POST", f"{LITELLM_BASE}/v1/messages",
+            headers={"Authorization": f"Bearer {MASTER_KEY}",
+                     "anthropic-version": "2023-06-01",
+                     "Content-Type": "application/json"},
+            json=payload,
+        )
+    else:  # direct
+        spec = _backends()[backend]
+        api_base = spec["api_base"].rstrip("/")
+        key = os.environ.get(spec["key_env"], "")
+        if not key:
+            raise HTTPException(400, f"环境变量 {spec['key_env']} 未配置（.env 里加）")
+        # 直连发后端原生模型名（litellm_model 去 provider 前缀），从 targets 的 native 映射取
+        native_model = _backend_test_targets()[backend]["native"].get(model, model)
+        payload = {"model": native_model, "max_tokens": 64,
+                   "messages": [{"role": "user", "content": prompt}]}
+        r = await _relay_request(
+            "POST", f"{api_base}/v1/messages",
+            headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                     "Content-Type": "application/json"},
+            json=payload,
+        )
+    elapsed = round((time.monotonic() - started) * 1000)
+
+    out: dict[str, Any] = {
+        "ok": r.status_code == 200,
+        "status": r.status_code,
+        "elapsed_ms": elapsed,
+        "headers": dict(r.headers),
+        "body": _safe_body(r),
+        "request": payload,
+    }
+    resp = JSONResponse(out)
+    auth.renew_session(resp)
+    return resp
+
+
+async def _relay_request(method: str, url: str, **kw) -> "httpx.Response":
+    """直连/经网关都走这里（60s 超时；上游 5xx 也要拿完整 body，不抛异常）。"""
+    async with httpx.AsyncClient(timeout=60.0) as c:
+        try:
+            return await c.request(method, url, **kw)
+        except httpx.HTTPError as exc:
+            # 网络层失败（连不上/超时/DNS）：包成伪响应，页面照样完整展示
+            return httpx.Response(
+                0, request=httpx.Request(method, url),
+                text=f"__network_error__\n{type(exc).__name__}: {exc}",
+            )
+
+
+def _safe_body(r: httpx.Response) -> str:
+    """上游 body 原样返回；非文本 content-type 截断到 8KB 提示。"""
+    ct = r.headers.get("content-type", "")
+    text = r.text
+    if not any(t in ct for t in ("json", "text", "event-stream")) and len(text) > 8192:
+        return f"[binary content-type: {ct or 'unknown'}, {len(text)} bytes, 截断]"
+    return text
 
 async def _list_key_hashes() -> list[str]:
     async with httpx.AsyncClient(timeout=30.0) as c:
