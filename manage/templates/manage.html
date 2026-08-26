@@ -107,6 +107,7 @@
     <div class="config-snippet" id="ccConfig"></div>
     <h2 style="font-size:13px">OpenAI 客户端配置</h2>
     <div class="config-snippet" id="oaiConfig"></div>
+    <button onclick="location.reload()" style="margin-top:12px">我已保存，刷新列表</button>
   </div>
 
   <!-- 现有 key 列表 -->
@@ -258,8 +259,8 @@
           `base_url = "${base}/v1"\napi_key  = "${key}"\n# 发 model=${backends[0]} 选后端`;
         document.getElementById('result').style.display = 'block';
         document.getElementById('result').scrollIntoView({ behavior: 'smooth' });
-        toast('创建成功');
-        setTimeout(() => location.reload(), 4000);
+        toast('创建成功（key 只显示这一次，请保存）');
+        // 不自动刷新：整页 reload 会把上面只显示一次的 key 冲掉，改为「我已保存」按钮手动刷新
       } catch (e) { toast(e.message, true); }
       finally { btn.disabled = false; btn.textContent = '创建 Key'; }
     }
