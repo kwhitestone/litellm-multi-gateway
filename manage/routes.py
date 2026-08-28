@@ -471,6 +471,18 @@ async def _list_key_hashes() -> list[str]:
 
 async def _fetch_keys() -> list[dict[str, Any]]:
     """返回 key 信息列表（alias/user/后端/hash/spend/budget/mappings），供模板渲染。"""
+    # model_name -> backend 反查表（按 backends.yaml 生成，任意后端自动识别，不再硬编码前缀）
+    try:
+        gc = _load_gen_config()
+        cfg = gc.load_backends(_BACKENDS_PATH)
+        model_to_backend = {
+            gc.model_name_for(bname, m): bname
+            for bname, bcfg in cfg["backends"].items()
+            for m in bcfg["models"]
+        }
+    except Exception:
+        model_to_backend = {}
+
     hashes = await _list_key_hashes()
     out: list[dict[str, Any]] = []
     async with httpx.AsyncClient(timeout=30.0) as c:
@@ -484,19 +496,8 @@ async def _fetch_keys() -> list[dict[str, Any]]:
                 continue
             info = r.json().get("info", {}) or {}
             aliases = info.get("aliases") or {}
-            bks: set[str] = set()
-            for v in aliases.values():
-                v = str(v)
-                if v.startswith("claude_1-"):
-                    bks.add("claude_1")
-                elif v.startswith("claude_2-"):
-                    bks.add("claude_2")
-                elif v.startswith("ark-"):
-                    bks.add("ark")
-                elif v.startswith("zai-"):
-                    bks.add("zai")
-                elif v.startswith("claude"):
-                    bks.add("claude")
+            bks: set[str] = {model_to_backend[str(v)] for v in aliases.values()
+                             if str(v) in model_to_backend}
             # 模型映射展示：短名（多后端 key 的 model=xxx 选择器）+ claude 七名映射
             mappings: list[dict[str, str]] = []
             short_map = {k: v for k, v in aliases.items() if not k.startswith("claude-")}
