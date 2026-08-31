@@ -31,7 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from . import auth, audit, backends_store
+from . import auth, audit, backends_store, secrets_store
 
 router = APIRouter(prefix="/manage")
 
@@ -346,6 +346,59 @@ async def save_backends(request: Request) -> JSONResponse:
     except RuntimeError as exc:
         raise HTTPException(500, str(exc))
     resp = JSONResponse({"ok": True})
+    auth.renew_session(resp)
+    return resp
+
+
+# ---------- 密钥管理（加密存储，重启后注入生效） ----------
+
+@router.get("/secrets", response_class=HTMLResponse,
+            dependencies=[Depends(auth.require_session)])
+async def secrets_page(request: Request):
+    """密钥管理页：列名/更新时间（不回显值），新增/删除。"""
+    try:
+        rows = [{"name": n, "updated": ts} for n, _enc, ts in secrets_store.list_all()]
+        db_ok = True
+    except Exception:
+        rows, db_ok = [], False
+    resp = templates.TemplateResponse(request, "secrets.html", {"secrets": rows, "db_ok": db_ok})
+    auth.renew_session(resp)
+    return resp
+
+
+@router.post("/api/secrets/set", dependencies=[Depends(auth.require_session)])
+async def secrets_set(request: Request) -> JSONResponse:
+    """加密入库。body: {name, value}。值只进 DB（Fernet 密文），不回显。"""
+    body = await request.json()
+    try:
+        secrets_store.set_secret(body.get("name") or "", body.get("value") or "")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"写入失败: {exc}")
+    audit.log_login(success=True, ip=_client_ip(request),
+                    user_agent=request.headers.get("user-agent", ""),
+                    note=f"secrets:set:{(body.get('name') or '?')[:40]}")
+    resp = JSONResponse({"ok": True})
+    auth.renew_session(resp)
+    return resp
+
+
+@router.post("/api/secrets/delete", dependencies=[Depends(auth.require_session)])
+async def secrets_delete(request: Request) -> JSONResponse:
+    """删除。body: {name}。删除后该 key 回退环境变量/云端配置的原值。"""
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name 必填")
+    try:
+        n = secrets_store.delete_secret(name)
+    except Exception as exc:
+        raise HTTPException(500, f"删除失败: {exc}")
+    audit.log_login(success=True, ip=_client_ip(request),
+                    user_agent=request.headers.get("user-agent", ""),
+                    note=f"secrets:delete:{name[:40]}")
+    resp = JSONResponse({"ok": True, "deleted": n})
     auth.renew_session(resp)
     return resp
 

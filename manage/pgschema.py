@@ -19,7 +19,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 SCHEMA = "manage"
 
-# 表 DDL 单一真相源（audit.py / backends_store.py 的查询用 qualified 名引用）
+# 表 DDL 单一真相源（audit.py / backends_store.py / secrets_store.py 的查询用 qualified 名引用）
 _TABLES: dict[str, str] = {
     "manage_login_audit": f"""
         CREATE TABLE IF NOT EXISTS {SCHEMA}.manage_login_audit (
@@ -34,6 +34,12 @@ _TABLES: dict[str, str] = {
         CREATE TABLE IF NOT EXISTS {SCHEMA}.gateway_backends (
             id INT PRIMARY KEY DEFAULT 1,
             content TEXT NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+    "secrets": f"""
+        CREATE TABLE IF NOT EXISTS {SCHEMA}.secrets (
+            name TEXT PRIMARY KEY,
+            value_encrypted TEXT NOT NULL,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
 }

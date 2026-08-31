@@ -60,6 +60,17 @@ if os.environ.get("DATABASE_URL"):
         print(f"[server] 自建表 schema 准备失败({exc!r})，继续启动", flush=True)
 _ensure_db_migrated()
 
+# 0.2 加密密钥注入（在 litellm 读 os.environ 之前）：
+# manage.secrets 表里存了 Fernet 加密的 provider key，这里解密写 os.environ。
+# 优先级最高（覆盖云端配置/环境变量的同名值），让"想藏的 key"不再出现在
+# 云端配置/PaaS 环境变量里。DB 不可达/解密失败不阻塞启动，用原值兜底。
+if os.environ.get("DATABASE_URL"):
+    try:
+        from manage.secrets_store import load_on_boot as _load_secrets
+        _load_secrets()
+    except Exception as exc:
+        print(f"[server] 加密密钥注入失败({exc!r})，密钥用环境变量原值", flush=True)
+
 # 0.5 backends.yaml 物化：PG 里存的是真相源（gateway_backends 表），拉下来覆盖
 # /app/backends.yaml 并重新生成 config.yaml。首次部署把镜像内置版入库；DB 不可达
 # 回退镜像内置版。必须在 import litellm 之前（config 在 import 时加载）。
