@@ -79,3 +79,32 @@ def recent_logins(limit: int = 20) -> list[dict]:
             conn.close()
     except Exception:
         return []
+
+
+def recent_secret_reads(limit: int = 20) -> list[dict]:
+    """查最近 N 条 secrets 表读审计（管理页展示用）。
+
+    数据来自 pgschema.audit_secrets_reads() 的轮询快照（pg_stat_statements），
+    管理页登录时顺手快照一次；DB 不可用/扩展未装返回空列表。"""
+    if not DATABASE_URL:
+        return []
+    try:
+        pgschema.audit_secrets_reads()
+        import psycopg2
+        conn = psycopg2.connect(DATABASE_URL)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT ts, db_user, client_addr, stat_calls "
+                    "FROM manage.secrets_read_audit ORDER BY id DESC LIMIT %s", (limit,)
+                )
+                rows = cur.fetchall()
+            return [
+                {"ts": r[0].isoformat() if r[0] else "-", "db_user": r[1] or "-",
+                 "client_addr": r[2] or "-", "stat_calls": r[3]}
+                for r in rows
+            ]
+        finally:
+            conn.close()
+    except Exception:
+        return []

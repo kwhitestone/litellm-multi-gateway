@@ -44,6 +44,27 @@ _TABLES: dict[str, str] = {
         )""",
 }
 
+# 密文虽不可直接解密，但「谁在收集密文」值得留痕：secrets 表的 SELECT 也审计
+# （PG 无原生 SELECT 触发器，用统计视图 + 轮询比对近似：见 audit_statements()）。
+# pg_stat_statements 需库级开启（shared_preload_libraries）；没开时降级为空。
+_AUDIT_SQL = """
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_tables
+                   WHERE schemaname = 'manage' AND tablename = 'secrets_read_audit') THEN
+        CREATE TABLE manage.secrets_read_audit (
+            id BIGSERIAL PRIMARY KEY,
+            ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            db_user TEXT,
+            client_addr TEXT,
+            query_fragment TEXT,
+            stat_calls BIGINT,
+            stat_rows BIGINT
+        );
+    END IF;
+END $$;
+"""
+
 _ready = False
 
 
@@ -71,7 +92,55 @@ def ensure() -> None:
                         f'SELECT * FROM public."{name}" ON CONFLICT DO NOTHING'
                     )
                     cur.execute(f'DROP TABLE public."{name}"')
+            _ensure_secrets_read_audit(cur)
         conn.commit()
         _ready = True
+    finally:
+        conn.close()
+
+
+def _ensure_secrets_read_audit(cur) -> None:
+    """建 secrets 读审计表（幂等）。数据来源是 audit_secrets_reads() 的轮询快照，
+    不是真触发器（PG 没有 SELECT 触发器）。"""
+    cur.execute(_AUDIT_SQL)
+
+
+def audit_secrets_reads() -> int:
+    """把 pg_stat_statements 里命中 manage.secrets 的 SELECT 快照进审计表。
+
+    返回新写入的行数；pg_stat_statements 不可用（未开 shared_preload_libraries
+    或无权限）时返回 0 并打印原因。调用方：audit.py 定期/登录时触发。
+    快照是累计值增量比对（stat_calls 增长才记一行），能看出「谁、何时、查了
+    多少次」，但同一 db_user+query 的多次读聚成一行；查完即 RESET 的人不留痕
+    （这是统计视图方案的本质局限，文档已写明）。"""
+    import psycopg2
+    if not DATABASE_URL:
+        return 0
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM pg_extension WHERE extname='pg_stat_statements'")
+            if cur.fetchone()[0] == 0:
+                print("[secrets-audit] pg_stat_statements 未安装，SELECT 审计降级为关闭", flush=True)
+                return 0
+            cur.execute("""
+                SELECT userid::regrole, query, calls, rows
+                FROM pg_stat_statements
+                WHERE query ILIKE '%manage.secrets%' AND query ILIKE 'select%'
+            """)
+            written = 0
+            for role, query, calls, rows in cur.fetchall():
+                cur.execute(
+                    "INSERT INTO manage.secrets_read_audit "
+                    "(db_user, client_addr, query_fragment, stat_calls, stat_rows) "
+                    "VALUES (%s, inet_client_addr()::text, %s, %s, %s)",
+                    (str(role), query[:200], calls, rows),
+                )
+                written += 1
+            conn.commit()
+            return written
+    except Exception as exc:
+        print(f"[secrets-audit] 读审计快照失败({exc!r})", flush=True)
+        return 0
     finally:
         conn.close()

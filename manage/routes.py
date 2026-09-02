@@ -361,7 +361,10 @@ async def secrets_page(request: Request):
         db_ok = True
     except Exception:
         rows, db_ok = [], False
-    resp = templates.TemplateResponse(request, "secrets.html", {"secrets": rows, "db_ok": db_ok})
+    # 打开密钥页顺手快照一次 secrets 读审计（pg_stat_statements，未装则空）
+    reads = audit.recent_secret_reads(10)
+    resp = templates.TemplateResponse(request, "secrets.html", {
+        "secrets": rows, "db_ok": db_ok, "secret_reads": reads})
     auth.renew_session(resp)
     return resp
 
