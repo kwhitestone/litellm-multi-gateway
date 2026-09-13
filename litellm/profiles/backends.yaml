@@ -46,6 +46,7 @@ backends:
     strip_thinking: true   # ark 不认 thinking.type=disabled（Claude Code 默认会发），剥掉；zai/claude 不需要
     models:
       glm: { litellm_model: anthropic/glm-5.3 }
+      glm-flash: { litellm_model: anthropic/glm-5.3-flash }
     mapping:
       "*": glm          # 所有 claude 名 -> ark-glm
 
@@ -64,34 +65,23 @@ backends:
       claude-opus-5: { litellm_model: anthropic/claude-opus-5 }
       claude-fable-5: { litellm_model: anthropic/claude-fable-5 }
 
-  # ===== claude_1 / claude_2（同公司网关，不同 key，隔离用量）=====
-  # 与 claude 后端完全相同，仅 key_env 不同。gen_config 自动加前缀（claude_1-claude-sonnet-5），
-  # model_list 不会撞名。虚拟 key --backend claude_1 即可路由到独立 key。
-  claude_1:
-    api_base: https://aicoding-gateway.ndaeweb.com:8443
-    key_env: CLAUDE_CODE_KEY_1
-    needs_vision: false
+  # ===== sub_ark（nd-sub2api 聚合网关，Anthropic 协议，纯文本端点，图片需转文字）=====
+  # api_base 写死而非读 SUB_ARK_BASE_URL：管理页「上游直连测试」直接拿这个值拼 URL，
+  # 写成 os.environ/ 引用会让测试页把字面量当域名。换地址改这一行即可。
+  # 只收录实测通过 /v1/messages 的模型：上游还暴露 kimi-k3 / doubao-seed-2.1-pro /
+  # deepseek-v3.2 等，但它们不在 coding plan 白名单里，调用直接 not_found_error。
+  sub_ark:
+    api_base: https://nd-sub2api.sdp.ndaeweb.com
+    key_env: SUB_ARK_API_KEY
+    needs_vision: true
     models:
-      claude-haiku-4-5-20251001: { litellm_model: anthropic/claude-haiku-4-5-20251001 }
-      claude-sonnet-4-6: { litellm_model: anthropic/claude-sonnet-4-6 }
-      claude-sonnet-5: { litellm_model: anthropic/claude-sonnet-5 }
-      claude-sonnet-4-8: { litellm_model: anthropic/claude-sonnet-4-8 }
-      claude-opus-4-8: { litellm_model: anthropic/claude-opus-4-8 }
-      claude-opus-5: { litellm_model: anthropic/claude-opus-5 }
-      claude-fable-5: { litellm_model: anthropic/claude-fable-5 }
-
-  claude_2:
-    api_base: https://aicoding-gateway.ndaeweb.com:8443
-    key_env: CLAUDE_CODE_KEY_2
-    needs_vision: false
-    models:
-      claude-haiku-4-5-20251001: { litellm_model: anthropic/claude-haiku-4-5-20251001 }
-      claude-sonnet-4-6: { litellm_model: anthropic/claude-sonnet-4-6 }
-      claude-sonnet-5: { litellm_model: anthropic/claude-sonnet-5 }
-      claude-sonnet-4-8: { litellm_model: anthropic/claude-sonnet-4-8 }
-      claude-opus-4-8: { litellm_model: anthropic/claude-opus-4-8 }
-      claude-opus-5: { litellm_model: anthropic/claude-opus-5 }
-      claude-fable-5: { litellm_model: anthropic/claude-fable-5 }
+      glm: { litellm_model: anthropic/glm-5.3 }
+      glm-flash: { litellm_model: anthropic/glm-5.3-flash }
+      kimi: { litellm_model: anthropic/kimi-k2.7-code }
+      deepseek: { litellm_model: anthropic/deepseek-latest }   # 实际落到 deepseek-v4-pro
+      minimax: { litellm_model: anthropic/minimax-m3 }
+    mapping:
+      "*": glm          # 所有 claude 名 -> sub_ark-glm
 
   # ===== zai（智谱 BigModel，glm-5.2 纯文本，图片需转文字）=====
   zai:
@@ -100,6 +90,7 @@ backends:
     needs_vision: true
     models:
       glm: { litellm_model: anthropic/glm-5.3 }
+      glm-flash: { litellm_model: anthropic/glm-5.3-flash }
     mapping:
       "*": glm         # 所有 claude 名 -> zai-glm
 
