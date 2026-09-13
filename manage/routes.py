@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from . import auth, audit, backends_store, secrets_store
+from .backend_probe import build_direct_request
 
 router = APIRouter(prefix="/manage")
 
@@ -465,7 +466,7 @@ def _backend_test_targets() -> dict[str, dict[str, Any]]:
 @router.get("/test", response_class=HTMLResponse,
             dependencies=[Depends(auth.require_session)])
 async def test_page(request: Request):
-    """上游测试页。核心是直连 vs 经网关对比：直连挂、网关通 -> 网关配置问题；反之亦然。"""
+    """上游测试页：对比直连和经网关的响应，帮助定位请求链路问题。"""
     resp = templates.TemplateResponse(request, "test.html", {
         "targets": _backend_test_targets(),
     })
@@ -476,7 +477,7 @@ async def test_page(request: Request):
 @router.post("/api/test", dependencies=[Depends(auth.require_session)])
 async def api_test(request: Request) -> JSONResponse:
     """发一条最小测试消息。body: {backend, model, mode}
-    mode=direct  容器内直连后端 api_base（不经 litellm，用 key_env 的真实 key）
+    mode=direct  按模型 provider 直连后端（不经 litellm，用 key_env 的真实 key）
     mode=gateway 经本网关 /v1/messages（用 master key，走完整 litellm 链路）
     返回完整上游响应（状态码/headers/body），错误也完整展示，方便排障。"""
     body = await request.json()
@@ -500,19 +501,21 @@ async def api_test(request: Request) -> JSONResponse:
         )
     else:  # direct
         spec = _backends()[backend]
-        api_base = spec["api_base"].rstrip("/")
         key = os.environ.get(spec["key_env"], "")
         if not key:
             raise HTTPException(400, f"环境变量 {spec['key_env']} 未配置（.env 里加）")
-        # 直连发后端原生模型名（litellm_model 去 provider 前缀），从 targets 的 native 映射取
-        native_model = _backend_test_targets()[backend]["native"].get(model, model)
-        payload = {"model": native_model, "max_tokens": 64,
-                   "messages": [{"role": "user", "content": prompt}]}
+        gc = _load_gen_config()
+        selected = next((mspec for name, mspec in spec["models"].items()
+                         if gc.model_name_for(backend, name) == model), None)
+        if selected is None:
+            raise HTTPException(400, "请选择该后端配置的模型")
+        try:
+            url, headers, payload = build_direct_request(
+                spec["api_base"], selected["litellm_model"], key, prompt)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
         r = await _relay_request(
-            "POST", f"{api_base}/v1/messages",
-            headers={"x-api-key": key, "anthropic-version": "2023-06-01",
-                     "Content-Type": "application/json"},
-            json=payload,
+            "POST", url, headers=headers, json=payload,
         )
     elapsed = round((time.monotonic() - started) * 1000)
 

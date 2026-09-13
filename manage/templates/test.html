@@ -70,7 +70,7 @@
     <a href="/manage/" style="float:right;font-size:13px">← 返回 Key 管理</a>
   </h1>
   <p class="sub">对任意后端发一条最小测试消息，<strong>完整展示上游返回</strong>（状态码 / headers / body / 耗时）。
-    排障口诀：<strong>直连挂 + 网关通 = 网关侧配置问题；直连通 + 网关挂 = 上游问题（找后端供应商）。</strong></p>
+    <strong>直连正常、经网关失败时，优先检查网关配置；两侧都失败时，对比错误响应再定位原因。</strong></p>
 
   <!-- 快捷入口：所有后端 -->
   <div class="card">
@@ -112,9 +112,9 @@
       </div>
     </div>
     <div class="hint" style="margin-top:8px">
-      直连 = 容器内直接 POST {api_base}/v1/messages（真实 key，不经 litellm）；
-      经网关 = POST 本网关 /v1/messages（master key，走完整路由/vision_hook/重试链路）。
-      模型列表来自 backends.yaml。非流式、max_tokens=64。
+      直连使用所选模型的原生接口：Anthropic Messages 或 OpenAI Chat Completions；
+      经网关使用 Anthropic Messages 接口，可检查网关的协议转换与路由。
+      模型列表来自后端配置。测试为非流式，输出 token 上限为 64（包含模型可能使用的推理 token）。
     </div>
   </div>
 
@@ -194,11 +194,11 @@
       const dOk = d.status === 200, gOk = g.status === 200;
       let html, bg;
       if (!dOk && gOk) {
-        bg = '#e8f0fe'; html = '<b>诊断：上游正常但经网关失败 → 网关侧配置问题。</b>检查 multi.yaml 模型映射 / vision_hook / master key 认证。';
+        bg = '#e8f0fe'; html = '<b>直连失败、经网关正常。</b>检查直连使用的接口、认证和参数，并对比两侧响应。';
       } else if (dOk && !gOk) {
         bg = '#fdecea'; html = '<b>诊断：直连正常但经网关失败 → 检查网关配置。</b>对比两侧请求体差异（模型名前缀、参数剥离）；看容器日志 docker logs litellm-multi-gateway-litellm-1。';
       } else if (!dOk && !gOk) {
-        bg = '#fef7e0'; html = `<b>诊断：直连和经网关都失败 → 上游 ${esc(document.getElementById('backend').value)} 本身的问题。</b>响应 body 里有上游的错误详情。这是上次 claude 后端 502 的同款情况：网关没毛病，上游通道挂了，需要联系该后端的维护方。`;
+        bg = '#fef7e0'; html = '<b>直连和经网关都失败。</b>对比错误响应，检查后端凭据、额度、网络与请求参数。';
       } else {
         bg = '#e8f8f0'; html = '<b>诊断：两条链路都正常 ✓</b>';
       }
