@@ -120,7 +120,7 @@ docker compose up -d          # 重启 litellm
 | `CLAUDE_CODE_KEY` | 公司 Claude 网关 key |
 | `Z_AI_API_KEY` | 智谱 BigModel key（vision hook 视觉模型默认也用） |
 | `UI_USERNAME` / `UI_PASSWORD` | Admin UI 登录凭据，密码务必强 |
-| `CLAUDE_CODE_KEY_1` / `CLAUDE_CODE_KEY_2` | 可选，多 key 隔离用量（claude_1/claude_2 后端） |
+| `SUB_ARK_API_KEY` | nd-sub2api 聚合网关 key（sub_ark 后端） |
 | `PUBLIC_BASE_URL` | 可选，对外公开地址（管理页展示给客户端的 BASE_URL） |
 
 ### 4.2 HTTPS

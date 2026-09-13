@@ -107,8 +107,7 @@ image_up() {
     -e ARK_API_KEY="$(get_env ARK_API_KEY)" \
     -e Z_AI_API_KEY="$(get_env Z_AI_API_KEY)" \
     -e CLAUDE_CODE_KEY="$(get_env CLAUDE_CODE_KEY)" \
-    -e CLAUDE_CODE_KEY_1="$(get_env CLAUDE_CODE_KEY_1 || true)" \
-    -e CLAUDE_CODE_KEY_2="$(get_env CLAUDE_CODE_KEY_2 || true)" \
+    -e SUB_ARK_API_KEY="$(get_env SUB_ARK_API_KEY || true)" \
     -e UI_USERNAME="$(get_env UI_USERNAME || echo admin)" \
     -e UI_PASSWORD="$(get_env UI_PASSWORD || echo admin)" \
     -e VISION_API_KEY="$(get_env VISION_API_KEY || true)" \

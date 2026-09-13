@@ -69,8 +69,7 @@ docker build -t litellm-gateway .
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PORT` | `4001` | 容器监听端口。PaaS 通常自动注入 `PORT`，此时会覆盖默认值 |
-| `CLAUDE_CODE_KEY_1` | （空） | claude_1 后端的独立 key（隔离用量）。不填则 claude_1 后端不可用 |
-| `CLAUDE_CODE_KEY_2` | （空） | claude_2 后端的独立 key。同上 |
+| `SUB_ARK_API_KEY` | （空） | sub_ark 后端（nd-sub2api 聚合网关）的 key。不填则 sub_ark 后端不可用 |
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:{PORT}` | 对外公开地址。管理页创建 key 后展示给客户端的 BASE_URL。线上填你的 HTTPS 域名 |
 | `MANAGE_SESSION_TTL_HOURS` | `12` | 管理页登录态有效期（小时）。滑动过期：每次操作自动续命 |
 | `MANAGE_COOKIE_SECURE` | （空） | 设为 `1` 或 `true`，会话 Cookie 加 `Secure` 标志（强制 HTTPS 才传）。线上建议开 |
@@ -181,7 +180,7 @@ https://your-gateway.example.com/manage/
 **第一次访问会跳到登录页**（`/manage/login`）。输入 `GATEWAY_MASTER_KEY` 登录，成功后签发 HttpOnly Cookie（12 小时有效，操作自动续期）。master key 只在登录时验一次，之后全程不出现在 URL 里。
 
 管理页能做：
-- **创建 key**：填用户名、勾后端（ark/claude/claude_1/claude_2/zai，可多选）、可选设预算上限和 RPM。创建后显示 key 明文 + Claude Code / OpenAI 客户端的配置代码块
+- **创建 key**：填用户名、勾后端（codex/ark/sub_ark/claude/zai，可多选）、可选设预算上限和 RPM。创建后显示 key 明文 + Claude Code / OpenAI 客户端的配置代码块
 - **查看 key 列表**：每个 key 显示后端 badge、用量、预算
 - **查看模型映射**：每行点「N 条映射 ▾」展开，看「客户端发的模型名 → 实际路由到哪个后端模型」
 - **编辑 key**：点「编辑」改后端（重建模型路由）或预算，秒级生效不重启

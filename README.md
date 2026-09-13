@@ -365,6 +365,29 @@ backends:
 - **后端**：`litellm/profiles/backends.yaml`（单一真相源，编辑后跑 `./keys.sh gen-config` 重生成 multi.yaml，再 `docker compose up -d`）
 - **视觉模型**：`.env` 里 `VISION_API_KEY` / `VISION_BASE_URL` / `VISION_MODEL`（任何 OpenAI 兼容视觉模型都行）
 
+### Codex 后端
+
+`codex` 使用公司 OpenAI 兼容网关，`.env` 中配置 `CODEX_API_KEY`。
+默认模型是 `codex-gpt-6-astra`；还可指定 `codex-gpt-5.5`、`codex-gpt-5.6`、
+`codex-gpt-5.6-sol`、`codex-gpt-5.6-terra`、`codex-gpt-5.6-luna`。
+
+管理页的后端配置另存于 Postgres；已有部署需先在 `/manage/backends` 中加入同一
+`codex` 配置并保存，保留已有后端，再执行下面的生成和重建步骤。
+保存后重建容器，创建 key 表单才会读取到新后端。
+
+```bash
+./keys.sh gen-config
+docker compose up -d --build --no-deps --force-recreate litellm
+./keys.sh new codex-user --backend codex
+```
+
+新增或修改 `.env` 后需要重建容器，`docker compose restart` 不会重新载入环境变量。
+
+客户端用生成的网关虚拟 key（不是上游 `CODEX_API_KEY`）访问
+`http://127.0.0.1:4001/v1/responses`，请求模型名为 `codex-gpt-6-astra`。
+Claude Code 可用同一个虚拟 key 和 `ANTHROPIC_BASE_URL=http://127.0.0.1:4001`；
+该 key 的 Claude 模型名统一映射到 `codex-gpt-6-astra`，既有 key 的路由不变。
+
 ## 部署到 PaaS（Railway / Render / Fly）
 
 仓库根目录的 `Dockerfile` 用于公共云部署：单容器镜像，Postgres 用平台托管实例（连接串走环境变量），key 管理用 `/manage/` 友好管理页，**无需 CLI**。

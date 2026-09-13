@@ -23,6 +23,21 @@
 # =============================================================================
 
 backends:
+  # ===== codex（公司 OpenAI 兼容网关；默认 gpt-6-astra）=====
+  codex:
+    api_base: https://aicoding-gateway.ndaeweb.com:8443/v1
+    key_env: CODEX_API_KEY
+    needs_vision: false
+    models:
+      gpt-6-astra: { litellm_model: openai/gpt-6-astra }
+      gpt-5.5: { litellm_model: openai/gpt-5.5 }
+      gpt-5.6: { litellm_model: openai/gpt-5.6 }
+      gpt-5.6-sol: { litellm_model: openai/gpt-5.6-sol }
+      gpt-5.6-terra: { litellm_model: openai/gpt-5.6-terra }
+      gpt-5.6-luna: { litellm_model: openai/gpt-5.6-luna }
+    mapping:
+      "*": gpt-6-astra
+
   # ===== ark（火山方舟 coding plan，纯文本端点，图片需转文字）=====
   ark:
     api_base: https://ark.cn-beijing.volces.com/api/coding

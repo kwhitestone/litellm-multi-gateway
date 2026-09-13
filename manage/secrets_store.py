@@ -1,7 +1,7 @@
 """
 manage/secrets_store.py - provider 密钥的加密存储。
 
-目的：provider key（CLAUDE_CODE_KEY_1/2/3、ARK_API_KEY、Z_AI_API_KEY 等）不再放
+目的：provider key（CLAUDE_CODE_KEY、SUB_ARK_API_KEY、ARK_API_KEY、Z_AI_API_KEY 等）不再放
 云端配置 / PaaS 环境变量（那里所有能读配置面的人都能看到明文），改为存
 manage.secrets 表（Fernet 加密），启动时解密注入进程环境变量。
 
