@@ -122,6 +122,23 @@ def load_on_boot() -> None:
         print(f"[backends_store] PG 读取失败({exc!r})，回退镜像内置版", flush=True)
 
 
+def regen_config() -> None:
+    """用当前 /app/backends.yaml 重新生成 /app/config.yaml（幂等，失败不阻塞启动）。
+
+    为什么启动时必须重跑一次：config.yaml 里的 guardrails 段（headroom 压缩）由
+    gen_config 读 HEADROOM_* 环境变量决定，而构建期跑 gen-config 时这些变量还不存在。
+    load_on_boot 只在「PG 里已有 backends 行」时重生成，首次部署 / 无 DATABASE_URL
+    的场景会停留在构建期产物，headroom env 配了也不生效。这里兜住所有路径。
+    调用点在 server.py，必须在 import litellm 之前（config 在 import 时加载）。
+    """
+    if not BAKED_BACKENDS.exists():
+        return
+    try:
+        _run_gen_config(BAKED_BACKENDS, BAKED_CONFIG)
+    except Exception as exc:
+        print(f"[backends_store] config.yaml 重新生成失败({exc!r})，用现有版本", flush=True)
+
+
 def fetch() -> Optional[dict]:
     """读当前存储的 backends.yaml。返回 {content, updated_at}，DB 不可用返回 None。"""
     try:

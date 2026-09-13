@@ -94,6 +94,13 @@
         <input id="rpm" type="number" min="0" placeholder="如 30">
         <div class="hint">每分钟最大请求数</div>
       </div>
+      {% if headroom_enabled %}
+      <div style="grid-column:1/-1">
+        <label><input type="checkbox" id="headroom"> 启用提示词压缩（headroom）</label>
+        <div class="hint">该 key 的请求先经 headroom 压缩再转发上游，省 input token；客户端无需改动。
+          单次想跳过压缩可加 header <code>x-headroom-bypass: true</code></div>
+      </div>
+      {% endif %}
     </div>
     <button id="createBtn" onclick="createKey()">创建 Key</button>
   </div>
@@ -127,6 +134,9 @@
             {% for b in k.backend.split(', ') %}
             <span class="badge {{ b.strip() }}">{{ b.strip() }}</span>
             {% endfor %}
+            {% if k.headroom %}
+            <span class="badge" style="background:#e8f5e9;color:#1b5e20" title="该 key 的请求经 headroom 压缩">压缩</span>
+            {% endif %}
           </td>
           <td>
             <span class="budget {{ '' if k.max_budget else 'none' }}">
@@ -149,7 +159,7 @@
         </tr>
         <tr id="edit-{{ k.hash[:12] }}" style="display:none;background:#f5f5f7">
           <td colspan="7" style="padding:12px 16px">
-            <div class="grid" style="grid-template-columns:2fr 1fr 1fr 1fr;gap:10px;align-items:end">
+            <div class="grid" style="grid-template-columns:2fr 1fr 1fr{{ ' 1fr' if headroom_enabled }} 1fr;gap:10px;align-items:end">
               <div>
                 <label style="font-size:12px">改后端（留空=不改）</label>
                 <div class="checkboxes" id="edit-be-{{ k.hash[:12] }}" style="flex-wrap:wrap;gap:6px">
@@ -166,6 +176,15 @@
                 <label style="font-size:12px">RPM</label>
                 <input id="edit-rpm-{{ k.hash[:12] }}" type="number" min="0" placeholder="不改" style="padding:5px 8px;font-size:12px">
               </div>
+              {% if headroom_enabled %}
+              <div>
+                <label style="font-size:12px">压缩</label>
+                <label style="font-size:12px;padding:3px 0">
+                  <input type="checkbox" id="edit-hr-{{ k.hash[:12] }}"
+                         data-was="{{ '1' if k.headroom else '0' }}" {{ 'checked' if k.headroom }}> headroom
+                </label>
+              </div>
+              {% endif %}
               <div>
                 <button onclick="saveEdit('{{ k.hash[:12] }}', '{{ k.hash }}')" style="margin:0;padding:6px 14px;font-size:12px">保存</button>
               </div>
@@ -239,15 +258,18 @@
       const budget = document.getElementById('budget').value;
       const rpm = document.getElementById('rpm').value;
       const backends = [...document.querySelectorAll('.be:checked')].map(c => c.value);
+      // headroom 勾选框只在服务端启用压缩时渲染，未渲染则不传该字段
+      const hrBox = document.getElementById('headroom');
       if (!user) return toast('请填用户名', true);
       if (!backends.length) return toast('至少选一个后端', true);
 
       const btn = document.getElementById('createBtn');
       btn.disabled = true; btn.textContent = '创建中…';
       try {
+        const body = { user, alias, backend: backends.join(','), max_budget: budget, rpm };
+        if (hrBox && hrBox.checked) body.headroom = true;
         const r = await fetch('/manage/api/new', {
-          method: 'POST', headers,
-          body: JSON.stringify({ user, alias, backend: backends.join(','), max_budget: budget, rpm })
+          method: 'POST', headers, body: JSON.stringify(body)
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || '创建失败');
@@ -293,12 +315,16 @@
       const backends = [...document.querySelectorAll('.ebe-' + id + ':checked')].map(c => c.value);
       const budget = document.getElementById('edit-budget-' + id).value;
       const rpm = document.getElementById('edit-rpm-' + id).value;
-      if (!backends.length && !budget && !rpm) return toast('没改动', true);
+      // headroom：只在勾选状态与当前值不同时才下发（data-was 是渲染时的真实状态）
+      const hrBox = document.getElementById('edit-hr-' + id);
+      const hrChanged = hrBox && hrBox.checked !== (hrBox.dataset.was === '1');
+      if (!backends.length && !budget && !rpm && !hrChanged) return toast('没改动', true);
       try {
         const body = { key: hash };
         if (backends.length) body.backend = backends.join(',');
         if (budget !== '') body.max_budget = parseFloat(budget) || 0;
         if (rpm) body.rpm = parseInt(rpm);
+        if (hrChanged) body.headroom = hrBox.checked;
         const r = await fetch('/manage/api/update', { method: 'POST', headers, body: JSON.stringify(body) });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || '更新失败');

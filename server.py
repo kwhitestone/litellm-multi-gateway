@@ -84,6 +84,15 @@ if os.environ.get("DATABASE_URL"):
     except Exception as exc:
         print(f"[server] backends 物化失败({exc!r})，用镜像内置版", flush=True)
 
+# 0.6 config.yaml 无条件重新生成：guardrails 段（headroom 压缩）依赖 HEADROOM_*
+# 环境变量，构建期跑 gen-config 时这些变量还不存在；load_on_boot 也只在 PG 里已有
+# backends 行时才重生成。这里兜住首次部署 / 无 DATABASE_URL 的路径。
+try:
+    from manage.backends_store import regen_config
+    regen_config()
+except Exception as exc:
+    print(f"[server] config.yaml 重新生成跳过({exc!r})", flush=True)
+
 # 1. import LiteLLM 的 app（会触发 config.yaml 加载 + 路由注册）
 from litellm.proxy.proxy_server import app  # noqa: E402
 

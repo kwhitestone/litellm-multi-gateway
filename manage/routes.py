@@ -112,6 +112,25 @@ def _resolve_aliases(gc, backend_str: str) -> tuple[dict[str, str], list[str]]:
     return aliases, sorted(all_models)
 
 
+def _headroom_enabled() -> bool:
+    """headroom 压缩是否在本实例启用（HEADROOM_API_BASE 配了即启用）。
+
+    管理页据此决定是否显示「压缩」勾选框；未启用时给 key 挂 guardrail 名会让
+    LiteLLM 找不到该 guardrail 而报错，所以两边用同一判断（gen_config 的 env 解析）。
+    """
+    try:
+        return _load_gen_config().headroom_settings() is not None
+    except Exception:
+        return False
+
+
+def _headroom_name() -> str:
+    try:
+        return _load_gen_config().HEADROOM_GUARDRAIL_NAME
+    except Exception:
+        return "headroom-compression"
+
+
 # ---------- 登录 / 登出 ----------
 
 @router.get("/login", response_class=HTMLResponse)
@@ -171,6 +190,7 @@ async def manage_page(request: Request):
         "keys": keys_info,
         "base_url": base_url_hint,
         "logins": logins,
+        "headroom_enabled": _headroom_enabled(),
     })
     auth.renew_session(resp)  # 滑动续命：Cookie 设到真正返回的 response 上
     return resp
@@ -192,6 +212,11 @@ async def new_key(request: Request) -> JSONResponse:
     gen_body: dict[str, Any] = {
         "user_id": user, "key_alias": alias, "aliases": aliases, "models": models,
     }
+    # headroom 压缩：勾了就把 guardrail 挂到 key 上（该 key 的请求自动压缩，客户端无需改动）
+    if body.get("headroom"):
+        if not _headroom_enabled():
+            raise HTTPException(400, "headroom 压缩未启用（需配置 HEADROOM_API_BASE 环境变量并重启）")
+        gen_body["guardrails"] = [_headroom_name()]
     if body.get("max_budget") not in (None, "", 0, "0"):
         try:
             gen_body["max_budget"] = float(body["max_budget"])
@@ -289,9 +314,17 @@ async def update_key(request: Request) -> JSONResponse:
                 update_body[field] = int(v)
             except (TypeError, ValueError):
                 raise HTTPException(400, f"{env} 必须是整数")
+    # headroom 压缩开关：传 true 挂上，传 false 摘掉（不传=不动）
+    if body.get("headroom") is not None:
+        if body["headroom"]:
+            if not _headroom_enabled():
+                raise HTTPException(400, "headroom 压缩未启用（需配置 HEADROOM_API_BASE 环境变量并重启）")
+            update_body["guardrails"] = [_headroom_name()]
+        else:
+            update_body["guardrails"] = []
 
     if len(update_body) == 1:  # 只有 key，没实际改动字段
-        raise HTTPException(400, "至少要传 backend 或 max_budget/rpm/tpm")
+        raise HTTPException(400, "至少要传 backend 或 max_budget/rpm/tpm/headroom")
 
     async with httpx.AsyncClient(timeout=30.0) as c:
         r = await c.post(
@@ -575,5 +608,7 @@ async def _fetch_keys() -> list[dict[str, Any]]:
                 "spend": info.get("spend") or 0,
                 "max_budget": info.get("max_budget"),
                 "mappings": mappings,
+                # 该 key 是否挂了 headroom 压缩 guardrail
+                "headroom": _headroom_name() in (info.get("guardrails") or []),
             })
     return out

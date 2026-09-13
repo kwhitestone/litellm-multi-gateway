@@ -15,6 +15,7 @@ backends.yaml 的 mapping 语法见该文件头部注释。
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -26,6 +27,37 @@ except ImportError:
 HERE = Path(__file__).resolve().parent
 DEFAULT_BACKENDS = HERE / "backends.yaml"
 DEFAULT_OUT = HERE / "multi.yaml"
+
+# ---- headroom 提示词压缩（LiteLLM 内置 guardrail，纯环境变量开关）----
+# HEADROOM_API_BASE 有值即启用：生成 guardrails 段，LiteLLM 在 pre_call 把 messages
+# 发到 {api_base}/v1/compress 压缩后再转发上游。为空/未设置则完全不生成该段
+# （HeadroomGuardrail.__init__ 缺 api_base 会抛 ValueError 直接起不来，所以必须由这里控制）。
+HEADROOM_GUARDRAIL_NAME = "headroom-compression"
+
+
+def headroom_settings(env: dict | None = None) -> dict | None:
+    """从环境变量解析 headroom 配置。未启用返回 None。
+
+    HEADROOM_API_BASE        压缩服务地址（唯一开关，空=停用）
+    HEADROOM_API_KEY         可选 Bearer token。这里不读值，只生成 os.environ/ 引用，
+                             密钥不落进 config.yaml（与 provider key 同款处理）
+    HEADROOM_DEFAULT_ON      true=所有请求都压缩；默认 false=只有挂了该 guardrail 的 key 生效
+    HEADROOM_UNREACHABLE     fail_open（默认，压缩服务挂了放行未压缩请求）| fail_closed（报错）
+    """
+    env = os.environ if env is None else env
+    api_base = (env.get("HEADROOM_API_BASE") or "").strip()
+    if not api_base:
+        return None
+    fallback = (env.get("HEADROOM_UNREACHABLE") or "fail_open").strip().lower()
+    if fallback not in ("fail_open", "fail_closed"):
+        sys.exit(f"错误：HEADROOM_UNREACHABLE 只能是 fail_open / fail_closed，收到 {fallback!r}")
+    return {
+        "api_base": api_base,
+        # 有 HEADROOM_API_KEY 才写 api_key，且写成 os.environ/ 引用而非明文
+        "api_key": "os.environ/HEADROOM_API_KEY" if (env.get("HEADROOM_API_KEY") or "").strip() else None,
+        "default_on": (env.get("HEADROOM_DEFAULT_ON") or "").strip().lower() in ("1", "true", "yes"),
+        "unreachable_fallback": fallback,
+    }
 
 
 def load_backends(path: Path = DEFAULT_BACKENDS) -> dict:
@@ -125,6 +157,22 @@ def gen_multi_yaml(cfg: dict) -> str:
                 f"    litellm_params: {{ model: {lm}, api_base: {api_base}, "
                 f"api_key: os.environ/{key_env} }}"
             )
+        lines.append("")
+
+    # headroom 压缩：HEADROOM_API_BASE 配了才生成（见 headroom_settings 注释）
+    hr = headroom_settings()
+    if hr:
+        lines.append("# ===== headroom 提示词压缩（由 HEADROOM_API_BASE 环境变量启用）=====")
+        lines.append("guardrails:")
+        lines.append(f"  - guardrail_name: {HEADROOM_GUARDRAIL_NAME}")
+        lines.append("    litellm_params:")
+        lines.append("      guardrail: headroom")
+        lines.append("      mode: pre_call")
+        lines.append(f"      api_base: {hr['api_base']}")
+        if hr["api_key"]:
+            lines.append(f"      api_key: {hr['api_key']}")
+        lines.append(f"      default_on: {'true' if hr['default_on'] else 'false'}")
+        lines.append(f"      unreachable_fallback: {hr['unreachable_fallback']}")
         lines.append("")
 
     # litellm_settings / general_settings 原样输出

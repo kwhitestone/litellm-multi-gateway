@@ -78,6 +78,48 @@ docker build -t litellm-gateway .
 | `VISION_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4` | 视觉模型 API 地址（OpenAI 兼容） |
 | `VISION_MODEL` | `glm-5v-turbo` | 视觉模型名。换成 GPT-4o 等也行 |
 | `VISION_MAX_IMAGES_PER_REQUEST` | `20` | 单次请求最多转几张图 |
+| `HEADROOM_API_BASE` | （空） | 提示词压缩服务地址。**这是压缩功能的唯一开关**，留空=完全停用 |
+| `HEADROOM_API_KEY` | （空） | 压缩服务的 Bearer token（服务要求鉴权时填）。只以 `os.environ/` 引用进 config，不落明文 |
+| `HEADROOM_DEFAULT_ON` | `false` | `true`=所有经网关的请求都压缩；默认 `false`=只有挂了压缩的 key 生效 |
+| `HEADROOM_UNREACHABLE` | `fail_open` | 压缩服务挂了/超时的行为。`fail_open`=放行未压缩请求（推荐）；`fail_closed`=报错 |
+
+---
+
+## 2.1 提示词压缩（headroom，可选）
+
+压缩 tool 输出、文件读取、RAG 载荷这类大块上下文，省 input token。LiteLLM 在 `pre_call`
+把 messages 发到 `{HEADROOM_API_BASE}/v1/compress`，拿压缩后的结果再转发上游——客户端和上游都不直连压缩服务。
+
+**启用**：配 `HEADROOM_API_BASE` 并重启。启动时 `gen_config.py` 会据此在 `config.yaml`
+生成 `guardrails` 段；不配则完全不生成该段（LiteLLM 缺 `api_base` 会起不来，所以必须由环境变量控制）。
+
+**压缩服务从哪来**：
+- 本地：`./scripts/docker-start.sh --with-headroom` 起 compose 里的 sidecar（`Dockerfile.headroom`），
+  然后 `HEADROOM_API_BASE=http://host.docker.internal:8787`。
+- 线上：单独部署一个 headroom 实例，`HEADROOM_API_BASE` 指向它。
+
+**谁生效**（默认 opt-in，可灰度）：
+
+```bash
+./keys.sh new alice --backend claude --headroom     # 新 key 带压缩
+./keys.sh update <key> --headroom                   # 给已有 key 开
+./keys.sh update <key> --no-headroom                # 关
+```
+
+管理页创建/编辑 key 时也有「压缩」勾选框（只在配了 `HEADROOM_API_BASE` 时显示），
+key 列表里带压缩的会有 `压缩` 徽章。想全局一把开：`HEADROOM_DEFAULT_ON=true`。
+
+**验证真的压了**：响应头 `x-litellm-applied-guardrails: headroom-compression`；
+或管理页 Logs 里看某条请求的 Guardrails 面板。单次想跳过压缩：请求加 header `x-headroom-bypass: true`。
+
+> **压缩率为 0 的两个常见原因**（都在 headroom 容器上，不在 LiteLLM config 里）：
+> 1. `user`/`system` 消息默认不压缩，而 Claude Code 流量几乎全是 `user` 角色——需要
+>    `HEADROOM_COMPRESS_USER_MESSAGES=1`（我们的 `Dockerfile.headroom` 已默认打开）。
+> 2. 带 Anthropic `cache_control` 标记的消息**永远**不压缩（压了会破坏 prompt cache 的
+>    字节匹配），这个没有开关。所以实际收益要看日志，别只看配置。
+>
+> 另外 headroom 默认只监听 loopback，对远程调用回 **404**（不是 403）——
+> 配错了看起来就像地址写错。跨容器调用必须 `HEADROOM_COMPRESS_ALLOW_REMOTE=1`（镜像已默认开）。
 
 ---
 

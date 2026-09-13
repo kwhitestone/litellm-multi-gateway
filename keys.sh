@@ -34,10 +34,12 @@ keys.sh - 管理客户端访问 key（绑 user，用量按 user 分开统计）
 
 用法:
   ./keys.sh                    显示帮助 + 现有 key 列表
-  ./keys.sh new <user> [alias] [--backend ark|claude|claude_1|claude_2|zai|逗号多选]
+  ./keys.sh new <user> [alias] [--backend ark|sub_ark|claude|zai|codex|逗号多选] [--headroom]
                  创建 key（默认后端 claude；--backend 决定该 key 走哪个后端）
+                 --headroom 给该 key 挂提示词压缩（需网关配了 HEADROOM_API_BASE）
   ./keys.sh list               列出所有 key（alias / user / hash）
-  ./keys.sh update <key> --backend ark|claude|claude_1|claude_2|zai   动态改该 key 的 7 名路由（不重启 litellm）
+  ./keys.sh update <key> [--backend ark|sub_ark|claude|zai|codex] [--headroom|--no-headroom]
+                 动态改该 key 的 7 名路由 / 压缩开关（不重启 litellm）
   ./keys.sh delete <hash>      删除 key（hash 从 list 拿，支持前缀匹配）
   ./keys.sh gen-config         从 backends.yaml 重新生成 multi.yaml（改完后端配置后跑）
 
@@ -68,12 +70,13 @@ except Exception: info={}
 al=info.get('aliases') or {}
 bks=set()
 for k,v in al.items():
-    if k in ('ark','claude','zai','claude_1','claude_2'): bks.add(k)  # 多后端短名
+    if k in ('ark','sub_ark','claude','zai','codex'): bks.add(k)  # 多后端短名
     v=str(v)
-    if v.startswith('claude_1-'): bks.add('claude_1')
-    elif v.startswith('claude_2-'): bks.add('claude_2')
+    # sub_ark- 必须在 ark- 之前判：否则前缀语义含糊（当前二者不互为前缀，顺序仍显式保证）
+    if v.startswith('sub_ark-'): bks.add('sub_ark')
     elif v.startswith('ark-'): bks.add('ark')
     elif v.startswith('zai-'): bks.add('zai')
+    elif v.startswith('codex-'): bks.add('codex')
     elif v.startswith('claude'): bks.add('claude')
 backend=','.join(sorted(bks)) if bks else '?'
 print('  %-18s %-12s %-12s %s' % (str(info.get('key_alias') or '-')[:18], str(info.get('user_id') or '-')[:12], backend[:12], sys.argv[1]))
@@ -89,34 +92,37 @@ case "${1:-help}" in
     ;;
   new)
     shift   # 去掉 "new"
-    user=""; alias=""; backend=""
+    user=""; alias=""; backend=""; headroom=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --backend) backend="$2"; shift 2 ;;
-        -h|--help) echo "用法: $0 new <user> [alias] [--backend ark|claude|claude_1|claude_2|zai|逗号多选]"; exit 0 ;;
+        --headroom) headroom="1"; shift ;;
+        -h|--help) echo "用法: $0 new <user> [alias] [--backend ark|sub_ark|claude|zai|codex|逗号多选] [--headroom]"; exit 0 ;;
         *) if [ -z "$user" ]; then user="$1"; elif [ -z "$alias" ]; then alias="$1"; fi; shift ;;
       esac
     done
-    [ -n "$user" ] || { echo "用法: $0 new <user> [alias] [--backend ark|claude|claude_1|claude_2|zai|逗号多选]"; exit 1; }
+    [ -n "$user" ] || { echo "用法: $0 new <user> [alias] [--backend ark|sub_ark|claude|zai|codex|逗号多选]"; exit 1; }
     [ -z "$alias" ] && alias="$user-key"
     # 单后端 key：cc 默认名 alias 到该后端（cc 不改配置即可走）；多后端 key：短名选后端
     if [ -z "$backend" ]; then
-      read -rp "后端（ark/claude/claude_1/claude_2/zai，逗号分隔多选）[claude]: " backend
+      read -rp "后端（ark/sub_ark/claude/zai/codex，逗号分隔多选）[claude]: " backend
       backend="${backend:-claude}"
     fi
     if [ "$(echo "$backend" | tr ',' '\n' | grep -c .)" -eq 1 ]; then
       # 单后端：claude 名按 backends.yaml 的 mapping 路由到该后端
       am=$($GEN_CONFIG aliases "$backend") || exit 1
-      body=$(KEY_USER="$user" KEY_ALIAS="$alias" AM="$am" python3 -c '
+      body=$(KEY_USER="$user" KEY_ALIAS="$alias" AM="$am" KEY_HEADROOM="$headroom" python3 -c '
 import json,os
 d=json.loads(os.environ["AM"]); d["user_id"]=os.environ["KEY_USER"]; d["key_alias"]=os.environ["KEY_ALIAS"]
+if os.environ.get("KEY_HEADROOM"): d["guardrails"]=["headroom-compression"]
 print(json.dumps(d))')
     else
       # 多后端：短名选后端 + 7 名默认指 claude-sonnet-5（若含 claude）
       am=$($GEN_CONFIG multi-aliases "$backend") || exit 1
-      body=$(KEY_USER="$user" KEY_ALIAS="$alias" AM="$am" python3 -c '
+      body=$(KEY_USER="$user" KEY_ALIAS="$alias" AM="$am" KEY_HEADROOM="$headroom" python3 -c '
 import json,os
 d=json.loads(os.environ["AM"]); d["user_id"]=os.environ["KEY_USER"]; d["key_alias"]=os.environ["KEY_ALIAS"]
+if os.environ.get("KEY_HEADROOM"): d["guardrails"]=["headroom-compression"]
 print(json.dumps(d))')
     fi
     [ -n "$body" ] || exit 1
@@ -178,24 +184,36 @@ print('✓ 删除成功:', d.get('message') or d.get('deleted_keys') or d)
     ;;
   update)
     shift
-    key=""; backend=""
+    key=""; backend=""; headroom=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --backend) backend="$2"; shift 2 ;;
-        -h|--help) echo "用法: $0 update <key明文|hash|前缀> --backend ark|claude|claude_1|claude_2|zai  （动态改路由，不重启 litellm）"; exit 0 ;;
+        --headroom) headroom="on"; shift ;;
+        --no-headroom) headroom="off"; shift ;;
+        -h|--help) echo "用法: $0 update <key明文|hash|前缀> [--backend ark|sub_ark|claude|zai|codex] [--headroom|--no-headroom]  （动态改路由/压缩，不重启 litellm）"; exit 0 ;;
         *) [ -z "$key" ] && key="$1"; shift ;;
       esac
     done
-    [ -n "$key" ] || { echo "用法: $0 update <key明文|hash|前缀> --backend ark|claude|claude_1|claude_2|zai"; exit 1; }
-    if [ -z "$backend" ]; then read -rp "新后端（ark/claude/claude_1/claude_2/zai）: " backend; fi
+    [ -n "$key" ] || { echo "用法: $0 update <key明文|hash|前缀> [--backend ...] [--headroom|--no-headroom]"; exit 1; }
+    # 只改压缩开关时不问后端；两个都没给才问（保持原交互）
+    if [ -z "$backend" ] && [ -z "$headroom" ]; then
+      read -rp "新后端（ark/sub_ark/claude/zai/codex）: " backend
+    fi
     full=$(resolve_key "$key")
     [ -n "$full" ] || { echo "错误: 无法解析 key '$key'（明文 sk- / hash / 前缀）" >&2; exit 1; }
     [ "$full" != "$key" ] && echo "  匹配完整 hash: $full"
-    # 重建完整 aliases + models（整体覆盖，gen_config 保证 7 名齐全）
-    am=$($GEN_CONFIG aliases "$backend") || exit 1
-    body=$(KEY="$full" AM="$am" python3 -c '
+    # 给了 --backend 才重建 aliases + models（整体覆盖，gen_config 保证 7 名齐全）
+    if [ -n "$backend" ]; then
+      am=$($GEN_CONFIG aliases "$backend") || exit 1
+    else
+      am='{}'
+    fi
+    body=$(KEY="$full" AM="$am" KEY_HEADROOM="$headroom" python3 -c '
 import json,os
 d=json.loads(os.environ["AM"]); d["key"]=os.environ["KEY"]
+hr=os.environ.get("KEY_HEADROOM")
+if hr == "on": d["guardrails"]=["headroom-compression"]
+elif hr == "off": d["guardrails"]=[]
 print(json.dumps(d))')
     cg -X POST "$BASE/key/update" \
       -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
@@ -205,10 +223,14 @@ import json,sys
 d=json.load(sys.stdin)
 if isinstance(d,dict) and "error" in d:
     print("✗ 更新失败:", d["error"].get("message") or d["error"]); sys.exit(1)
-print("✓ 路由已切换 ->", sys.argv[1], "（下个请求即生效，无需重启）")
-for k,v in sorted((d.get("aliases") or {}).items()):
-    print("   ", k, "->", v)
-' "$backend"
+backend, hr = sys.argv[1], sys.argv[2]
+if backend:
+    print("✓ 路由已切换 ->", backend, "（下个请求即生效，无需重启）")
+    for k,v in sorted((d.get("aliases") or {}).items()):
+        print("   ", k, "->", v)
+if hr == "on":   print("✓ 提示词压缩已开启（headroom-compression）")
+elif hr == "off": print("✓ 提示词压缩已关闭")
+' "$backend" "$headroom"
     ;;
   gen-config)
     # 从 backends.yaml 重新生成 multi.yaml（改完后端配置后跑这个）
