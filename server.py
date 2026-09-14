@@ -102,34 +102,44 @@ app.include_router(manage_router)
 
 # 2.5 backends 实时同步协程：把 PG 里的真相源与容器内 /app/backends.yaml 持续对齐，
 # 变更后热重载路由表（不重启）。没配 DATABASE_URL 时不启（纯镜像模式没有真相源）。
-# 注册成 startup/shutdown 事件而不是在 import 时 create_task：import 阶段还没有
-# 运行中的 event loop，而且 uvicorn 关闭时要能 cancel 掉它干净退出。
+# 注意：litellm 的 app 用自定义 lifespan（FastAPI(lifespan=proxy_startup_event)，
+# proxy_server.py:1377），starlette 会用该 lifespan 替换 _DefaultLifespan，导致
+# @app.on_event("startup"/"shutdown") 钩子永远不触发。所以这里不注册事件钩子，
+# 而是把 litellm 的 lifespan 包一层：内层先跑 litellm 初始化，外层随后启动同步
+# 协程（start 在 yield 前、stop 在 yield 后，与 lifespan 语义对齐）。
 if os.environ.get("DATABASE_URL"):
     import asyncio as _asyncio
+    from contextlib import asynccontextmanager as _acm
 
     _sync_task = None
 
-    @app.on_event("startup")
-    async def _start_backends_sync() -> None:  # noqa: D401
+    @_acm
+    async def _wrapped_lifespan(_app):
         global _sync_task
-        try:
-            from manage.backends_sync import SYNC_INTERVAL_SECONDS, sync_loop
-            _sync_task = _asyncio.create_task(sync_loop(SYNC_INTERVAL_SECONDS))
-        except Exception as exc:
-            print(f"[server] backends 同步协程启动失败({exc!r})，配置改动需重启生效", flush=True)
+        # 先让 litellm 自己的启动逻辑完整跑完（proxy_startup_event），
+        # 否则同步协程首跑时 llm_router 还没初始化好，热重载无从谈起。
+        async with _litellm_lifespan(_app):
+            try:
+                from manage.backends_sync import SYNC_INTERVAL_SECONDS, sync_loop
+                _sync_task = _asyncio.create_task(sync_loop(SYNC_INTERVAL_SECONDS))
+            except Exception as exc:
+                print(f"[server] backends 同步协程启动失败({exc!r})，配置改动需重启生效", flush=True)
+            try:
+                yield
+            finally:
+                if _sync_task is not None:
+                    _sync_task.cancel()
+                    try:
+                        await _sync_task
+                    except _asyncio.CancelledError:
+                        pass
+                    except Exception as exc:
+                        print(f"[server] backends 同步协程退出异常({exc!r})", flush=True)
 
-    @app.on_event("shutdown")
-    async def _stop_backends_sync() -> None:  # noqa: D401
-        if _sync_task is None:
-            return
-        _sync_task.cancel()
-        try:
-            await _sync_task
-        except _asyncio.CancelledError:
-            pass
-        except Exception as exc:
-            print(f"[server] backends 同步协程退出异常({exc!r})", flush=True)
-
+    # litellm app 原有 lifespan（被 FastAPI router 包装前的可调用对象）
+    _litellm_lifespan = app.router.lifespan_context
+    # 替换 router 的 lifespan 上下文：外层是我们包装的，内层是 litellm 的
+    app.router.lifespan_context = _wrapped_lifespan
 # 3. 启动
 if __name__ == "__main__":
     import uvicorn
