@@ -31,7 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from . import auth, audit, backends_store, secrets_store
+from . import auth, audit, backends_store, backends_sync, secrets_store
 from .backend_probe import build_direct_request
 
 router = APIRouter(prefix="/manage")
@@ -340,7 +340,7 @@ async def update_key(request: Request) -> JSONResponse:
     return resp
 
 
-# ---------- backends.yaml 编辑（PG 存储，重启生效） ----------
+# ---------- backends.yaml 编辑（PG 存储，保存即生效） ----------
 
 @router.get("/backends", response_class=HTMLResponse,
             dependencies=[Depends(auth.require_session)])
@@ -360,15 +360,28 @@ async def backends_page(request: Request):
         "content": content,
         "updated": updated,
         "db_ok": db_ok,
+        "sync": backends_sync.STATUS.as_dict(),
+        "sync_interval": int(backends_sync.SYNC_INTERVAL_SECONDS),
     })
     auth.renew_session(resp)
     return resp
 
 
+@router.get("/api/backends/status", dependencies=[Depends(auth.require_session)])
+async def backends_sync_status() -> JSONResponse:
+    """同步状态（给编辑页轮询刷横幅用）：错误详情 + 最近生效时间。"""
+    return JSONResponse(backends_sync.STATUS.as_dict())
+
+
 @router.post("/api/backends", dependencies=[Depends(auth.require_session)])
 async def save_backends(request: Request) -> JSONResponse:
     """保存 backends.yaml。body: {content: <yaml 全文>}
-    校验（gen_config 试生成 config.yaml）通过才入库；重启容器后生效。"""
+
+    快路径：校验入库后，本实例立刻物化 + regen + 热重载，不等 10s 轮询。
+    其余实例由各自的同步协程在一个周期内跟上（DB 的 updated_at 已跳变）。
+    入库成功但热重载失败不算保存失败——配置已经在真相源里了，重启必然生效，
+    所以返回 200 但带 reload_error，让页面提示「已保存，但路由仍是旧的」。
+    """
     body = await request.json()
     content = body.get("content") or ""
     if not content.strip():
@@ -379,7 +392,20 @@ async def save_backends(request: Request) -> JSONResponse:
         raise HTTPException(400, f"校验失败: {exc}")
     except RuntimeError as exc:
         raise HTTPException(500, str(exc))
-    resp = JSONResponse({"ok": True})
+
+    applied_at = None
+    reload_error = None
+    try:
+        applied_at = await backends_sync.apply_now(content)
+    except Exception as exc:
+        reload_error = str(exc)
+
+    resp = JSONResponse({
+        "ok": True,
+        "applied_at": applied_at,
+        "reload_error": reload_error,
+        "sync_interval": int(backends_sync.SYNC_INTERVAL_SECONDS),
+    })
     auth.renew_session(resp)
     return resp
 

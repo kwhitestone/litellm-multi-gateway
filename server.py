@@ -100,6 +100,36 @@ from litellm.proxy.proxy_server import app  # noqa: E402
 from manage.routes import router as manage_router  # noqa: E402
 app.include_router(manage_router)
 
+# 2.5 backends 实时同步协程：把 PG 里的真相源与容器内 /app/backends.yaml 持续对齐，
+# 变更后热重载路由表（不重启）。没配 DATABASE_URL 时不启（纯镜像模式没有真相源）。
+# 注册成 startup/shutdown 事件而不是在 import 时 create_task：import 阶段还没有
+# 运行中的 event loop，而且 uvicorn 关闭时要能 cancel 掉它干净退出。
+if os.environ.get("DATABASE_URL"):
+    import asyncio as _asyncio
+
+    _sync_task = None
+
+    @app.on_event("startup")
+    async def _start_backends_sync() -> None:  # noqa: D401
+        global _sync_task
+        try:
+            from manage.backends_sync import SYNC_INTERVAL_SECONDS, sync_loop
+            _sync_task = _asyncio.create_task(sync_loop(SYNC_INTERVAL_SECONDS))
+        except Exception as exc:
+            print(f"[server] backends 同步协程启动失败({exc!r})，配置改动需重启生效", flush=True)
+
+    @app.on_event("shutdown")
+    async def _stop_backends_sync() -> None:  # noqa: D401
+        if _sync_task is None:
+            return
+        _sync_task.cancel()
+        try:
+            await _sync_task
+        except _asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            print(f"[server] backends 同步协程退出异常({exc!r})", flush=True)
+
 # 3. 启动
 if __name__ == "__main__":
     import uvicorn

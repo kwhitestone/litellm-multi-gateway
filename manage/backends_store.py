@@ -46,9 +46,34 @@ def _run_gen_config(backends_path: Path, out_path: Path) -> None:
         capture_output=True, text=True, timeout=60,
     )
     if r.returncode != 0:
-        # 语法错误 stderr 带 traceback，提取 yaml/py 抛错主体（RuntimeError 显示时再截尾）
-        err = (r.stderr or r.stdout or "gen_config 无输出").strip().splitlines()
-        raise RuntimeError("\n".join(err[-8:]))
+        raise RuntimeError(_readable_error(r.stderr or r.stdout))
+
+
+def _readable_error(raw: str | None) -> str:
+    """把 gen_config 的 stderr 压成人能读的一两行。
+
+    直接回传 stderr 尾部会把 Python traceback 的 File/^^^^ 骨架糊到管理页横幅上，
+    运维看到的是一堆栈帧而不是「第几行 YAML 写错了」。这里挑真正有信息量的行：
+    yaml 的错误位置（line N, column M）和最后一行异常消息，都没有才退回原文尾部。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return "gen_config 无输出"
+    lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+    # traceback 的结构性噪声：栈帧、源码回显、插入符
+    noise = [ln for ln in lines
+             if not ln.lstrip().startswith(("File \"", "Traceback", "^", "~", "|"))]
+    picked = [ln.strip() for ln in noise
+              if ("line" in ln and "column" in ln) or ln.startswith(("错误", "yaml.", "ValueError"))]
+    if not picked:
+        picked = [noise[-1].strip()] if noise else [lines[-1]]
+    # 去重保序，最多三行——横幅不是日志窗口
+    seen, out = set(), []
+    for ln in picked:
+        if ln not in seen:
+            seen.add(ln)
+            out.append(ln)
+    return "\n".join(out[:3])
 
 
 def validate(content: str) -> str:
@@ -137,6 +162,62 @@ def regen_config() -> None:
         _run_gen_config(BAKED_BACKENDS, BAKED_CONFIG)
     except Exception as exc:
         print(f"[backends_store] config.yaml 重新生成失败({exc!r})，用现有版本", flush=True)
+
+
+def fetch_raw() -> dict:
+    """给同步协程用的原始快照：{reachable, content, updated_at}。
+
+    与 fetch() 的区别：fetch() 是给管理页展示用的，DB 不可用时返回 None、没行时
+    拿镜像内置版顶上；同步协程需要区分「连不上」「连上了但没行」「有行」三种状态，
+    而且 updated_at 要保留 datetime 原值（不转字符串）才好跟上轮坐标做相等比较。
+    """
+    try:
+        pgschema.ensure()
+        conn = _connect()
+        if conn is None:
+            return {"reachable": False, "content": None, "updated_at": None}
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT content, updated_at FROM {_TABLE} WHERE id = 1")
+                row = cur.fetchone()
+                if row is None:
+                    # 连上了但没行：reachable=True + content=None -> decide() 走 SEED
+                    return {"reachable": True, "content": None, "updated_at": None}
+                return {"reachable": True, "content": row[0], "updated_at": row[1]}
+    except Exception:
+        return {"reachable": False, "content": None, "updated_at": None}
+
+
+def seed_from_file(content: str) -> None:
+    """首次部署：表里没行时把当前文件内容作为初始值入库。
+
+    用 ON CONFLICT DO NOTHING 而不是 upsert：并发场景下别的实例可能刚插进去，
+    这时不该用本地文件盖掉人家的——让那一行赢，本实例下轮 PULL 过来即可。
+    """
+    if not content:
+        raise RuntimeError("文件内容为空，拒绝作为初始值入库")
+    pgschema.ensure()
+    conn = _connect()
+    if conn is None:
+        raise RuntimeError("DATABASE_URL 未配置，无法入库")
+    with conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO {_TABLE} (id, content, updated_at) "
+                "VALUES (1, %s, NOW()) ON CONFLICT (id) DO NOTHING",
+                (content,),
+            )
+        conn.commit()
+
+
+def regen_config_strict() -> None:
+    """同 regen_config，但失败抛异常而不是吞掉。
+
+    regen_config 是启动路径用的（失败也要让进程起来，用现有 config.yaml 兜底）；
+    同步路径需要知道生成失败，好把错误显示到管理页横幅、并且不去热重载一个
+    没更新成功的 config.yaml。
+    """
+    _run_gen_config(BAKED_BACKENDS, BAKED_CONFIG)
 
 
 def fetch() -> Optional[dict]:

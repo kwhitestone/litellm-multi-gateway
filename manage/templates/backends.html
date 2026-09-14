@@ -35,6 +35,14 @@
     .toast.show { opacity: 1; }
     .toast.err { background: #ff3b30; }
     .toast.ok { background: #34c759; }
+    /* 同步状态横幅：错误红、告警橙，详情用等宽字体便于看 gen-config 的报错 */
+    .banner { border-radius: 10px; padding: 12px 16px; margin-bottom: 12px; font-size: 13px;
+              font-weight: 600; }
+    .banner.err { background: #fdecea; color: #b3261e; border: 1px solid #f5c6c2; }
+    .banner.warn-b { background: #fff8e1; color: #8a5a00; border: 1px solid #ffe0a3; }
+    .banner .detail { font-weight: 400; margin-top: 6px; white-space: pre-wrap;
+                      font-family: "SF Mono", Consolas, monospace; font-size: 12px; }
+    .mono { font-family: "SF Mono", Consolas, monospace; }
   </style>
 </head>
 <body>
@@ -42,13 +50,33 @@
     <a href="/manage/" style="float:right;font-size:13px">← 返回 Key 管理</a>
     <a href="/manage/test" style="float:right;font-size:13px;margin-right:16px">上游测试</a>
   </h1>
-  <p class="sub">配置存储在数据库，保存后<strong>重启容器生效</strong>。保存前会用生成器校验（YAML 语法 / mapping 指向 / 缺后端等）。改动 provider key 不在这里——那是环境变量。</p>
+  <p class="sub">配置存储在数据库，保存后<strong>立即生效</strong>（本实例即时热重载路由，其余实例 {{ sync_interval }} 秒内自动同步，都无需重启）。保存前会用生成器校验（YAML 语法 / mapping 指向 / 缺后端等）。改动 provider key 不在这里——那是环境变量。</p>
+
+  <!-- 同步状态横幅：DB 里的坏配置 / 本地文件回写失败 / 热重载失败，都在这里明示 -->
+  <div id="banners">
+    {% if sync.pull_error %}
+    <div class="banner err">⚠ 数据库中的配置无法应用<div class="detail">{{ sync.pull_error }}</div></div>
+    {% endif %}
+    {% if sync.push_error %}
+    <div class="banner err">⚠ 容器内文件的改动无法写入数据库<div class="detail">{{ sync.push_error }}</div></div>
+    {% endif %}
+    {% if sync.reload_error %}
+    <div class="banner err">⚠ 路由热重载失败（仍在运行旧配置）<div class="detail">{{ sync.reload_error }}</div></div>
+    {% endif %}
+    {% if sync.overwrite_warning %}
+    <div class="banner warn-b">⚠ 本地改动已被数据库覆盖<div class="detail">{{ sync.overwrite_warning }}</div></div>
+    {% endif %}
+    {% if sync.db_down %}
+    <div class="banner warn-b">⚠ 数据库连接不可用，同步已暂停<div class="detail">恢复连接后自动继续；期间路由保持当前配置不变。</div></div>
+    {% endif %}
+  </div>
 
   <div class="card">
     {% if db_ok %}
     <p class="meta">
       <span class="ok">● 存储已连接</span>
       {% if updated %}· 最后修改：{{ updated[:19] }}{% else %}· 尚未初始化（首次保存将写入数据库）{% endif %}
+      {% if sync.last_ok_at %}· <span class="ok">最近生效：{{ sync.last_ok_at[:19] }}</span>{% endif %}
     </p>
     {% else %}
     <p class="meta"><span class="warn">● 数据库不可用</span> · 下方展示的是容器当前在用的文件，保存会失败</p>
@@ -56,7 +84,7 @@
     <textarea id="content" spellcheck="false">{{ content }}</textarea>
     <button id="saveBtn" onclick="save()">校验并保存</button>
     <button class="secondary" onclick="reload()">放弃修改</button>
-    <p class="meta">保存成功后需要重启容器：自建主机 <span class="mono">docker restart gateway</span>；PaaS 平台点 Restart。</p>
+    <p class="meta">保存即生效，无需重启。直接改数据库、或改容器内 <span class="mono">/app/backends.yaml</span>，也会在 {{ sync_interval }} 秒内被自动同步。</p>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -76,7 +104,7 @@
     async function save() {
       const content = document.getElementById('content').value;
       if (content === original) return toast('内容没有改动', 'err');
-      if (!confirm('保存后需重启容器才生效，确认保存？')) return;
+      if (!confirm('保存后立即生效（路由热重载，不重启），确认保存？')) return;
       const btn = document.getElementById('saveBtn');
       btn.disabled = true; btn.textContent = '校验中…';
       try {
@@ -85,8 +113,15 @@
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || '保存失败');
-        toast('✓ 已保存。重启容器后生效', 'ok');
-        setTimeout(() => location.reload(), 2000);
+        // 入库成功但热重载失败：配置已在真相源里，重启必然生效，所以不是保存失败，
+        // 但必须如实说明当前路由还是旧的，别让人以为已经切过去了。
+        if (d.reload_error) {
+          toast('已保存到数据库，但路由热重载失败，当前仍在跑旧配置：\n' + d.reload_error, 'err');
+        } else {
+          toast('✓ 已保存并生效' + (d.applied_at ? '（' + d.applied_at.slice(0, 19) + '）' : '')
+                + '，其余实例 ' + (d.sync_interval || 10) + ' 秒内同步', 'ok');
+        }
+        setTimeout(() => location.reload(), 2500);
       } catch (e) { toast(e.message, 'err'); }
       finally { btn.disabled = false; btn.textContent = '校验并保存'; }
     }
