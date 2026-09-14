@@ -38,9 +38,9 @@ ENV PYTHONPATH=/app/hooks:/app
 ENV PORT=4001
 EXPOSE 4001
 
-# 健康检查（PaaS 用）
+# 健康检查（PaaS 用；镜像内无 curl，用 python3 探活）
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=40s \
-  CMD curl -sf http://localhost:${PORT}/health/liveness || exit 1
+  CMD python3 -c "import os,urllib.request as u; u.urlopen('http://localhost:'+os.environ.get('PORT','8080')+'/health/liveness', timeout=4)" || exit 1
 
 # 单进程入口：import litellm app → include 管理页 router → uvicorn
 # 必须覆盖父镜像的 ENTRYPOINT（docker/prod_entrypoint.sh 会用 `litellm "$@"` 包装 CMD）
