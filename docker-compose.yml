@@ -51,7 +51,7 @@ services:
       - ./litellm/profiles/multi.yaml:/app/config.yaml:ro   # 多后端共存（走 litellm 原生 /v1/messages 等）
       - ./litellm/hooks:/app/hooks:ro   # vision_hook 等 CustomLogger（config callbacks 加载）
     ports:
-      - "127.0.0.1:4001:4001"   # 客户端入口 + Admin UI + /manage
+      - "0.0.0.0:4001:4001"   # 客户端入口 + Admin UI + /manage
     restart: unless-stopped
 
 volumes:
