@@ -9,7 +9,10 @@
 #           -e ARK_API_KEY=... -e CLAUDE_CODE_KEY=... -e Z_AI_API_KEY=... \
 #           litellm-gateway
 # =============================================================================
-FROM ghcr.io/berriai/litellm:main-stable
+# 基础镜像钉 digest：main-stable 是滚动 tag，重建会静默漂到新 litellm 版本
+# （1.82→1.98 就曾改变 guardrail pre_call 行为）。本 digest = litellm 1.98.0，
+# 即 4001/4002 当前已验证行为的那一层。升级需显式改此行并重跑验证矩阵。
+FROM ghcr.io/berriai/litellm@sha256:20b5044b619055374061a6d5b7b08754cad75aeabbf82ddf4f69cc0cf80ddaf4
 
 WORKDIR /app
 
