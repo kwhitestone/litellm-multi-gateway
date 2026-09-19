@@ -116,8 +116,7 @@ def _resolve_aliases(gc, backend_str: str) -> tuple[dict[str, str], list[str]]:
 def _headroom_enabled() -> bool:
     """headroom 压缩是否在本实例启用（HEADROOM_API_BASE 配了即启用）。
 
-    管理页据此决定是否显示「压缩」勾选框；未启用时给 key 挂 guardrail 名会让
-    LiteLLM 找不到该 guardrail 而报错，所以两边用同一判断（gen_config 的 env 解析）。
+    管理页据此决定是否显示「压缩」勾选框。
     """
     try:
         return _load_gen_config().headroom_settings() is not None
@@ -130,6 +129,34 @@ def _headroom_name() -> str:
         return _load_gen_config().HEADROOM_GUARDRAIL_NAME
     except Exception:
         return "headroom-compression"
+
+
+# headroom 按 key 开关走「全局默认压缩 + 逐 key 关闭」（B-lite）：
+# 给 key 挂 guardrails=[...] 是企业版字段，无 license 时 /key/generate 直接 403；
+# 而 disable_global_guardrails 写进 metadata 字典不过 _premium_user_check（企业版
+# 门禁只扫顶层字段），所以反过来：config.yaml 里 default_on=true 全局压缩，
+# 不想压的 key 标记 metadata.disable_global_guardrails=true。
+_HEADROOM_DISABLE_FIELD = "disable_global_guardrails"
+
+
+async def _key_metadata(key: str) -> dict[str, Any]:
+    """读回该 key 当前的完整 metadata（/key/update 是整体替换，改前必须先读）。"""
+    async with httpx.AsyncClient(timeout=30.0) as c:
+        r = await c.get(
+            f"{LITELLM_BASE}/key/info",
+            params={"key": key},
+            headers={"Authorization": f"Bearer {MASTER_KEY}"},
+        )
+    if r.status_code != 200:
+        raise HTTPException(500, f"读取 key 信息失败: {r.text}")
+    return (r.json().get("info") or {}).get("metadata") or {}
+
+
+def _with_headroom_flag(metadata: dict[str, Any], compress: bool) -> dict[str, Any]:
+    """在既有 metadata 上增量改压缩开关，其余字段（tags/spend_logs_metadata…）原样保留。"""
+    merged = dict(metadata)
+    merged[_HEADROOM_DISABLE_FIELD] = not compress
+    return merged
 
 
 # ---------- 登录 / 登出 ----------
@@ -213,11 +240,10 @@ async def new_key(request: Request) -> JSONResponse:
     gen_body: dict[str, Any] = {
         "user_id": user, "key_alias": alias, "aliases": aliases, "models": models,
     }
-    # headroom 压缩：勾了就把 guardrail 挂到 key 上（该 key 的请求自动压缩，客户端无需改动）
-    if body.get("headroom"):
-        if not _headroom_enabled():
-            raise HTTPException(400, "headroom 压缩未启用（需配置 HEADROOM_API_BASE 环境变量并重启）")
-        gen_body["guardrails"] = [_headroom_name()]
+    # headroom 压缩：全局 default_on=true，这里只在显式关闭时打 disable 标记。
+    # 不传 headroom = 默认压缩（新 key 无需任何额外字段）。
+    if body.get("headroom") is not None:
+        gen_body["metadata"] = _with_headroom_flag({}, bool(body["headroom"]))
     if body.get("max_budget") not in (None, "", 0, "0"):
         try:
             gen_body["max_budget"] = float(body["max_budget"])
@@ -315,14 +341,12 @@ async def update_key(request: Request) -> JSONResponse:
                 update_body[field] = int(v)
             except (TypeError, ValueError):
                 raise HTTPException(400, f"{env} 必须是整数")
-    # headroom 压缩开关：传 true 挂上，传 false 摘掉（不传=不动）
+    # headroom 压缩开关（不传=不动）。/key/update 的 metadata 是整体替换不是 merge，
+    # 所以先读回现有 metadata 再增量改，避免抹掉 tags/spend_logs_metadata 等既有字段。
     if body.get("headroom") is not None:
-        if body["headroom"]:
-            if not _headroom_enabled():
-                raise HTTPException(400, "headroom 压缩未启用（需配置 HEADROOM_API_BASE 环境变量并重启）")
-            update_body["guardrails"] = [_headroom_name()]
-        else:
-            update_body["guardrails"] = []
+        update_body["metadata"] = _with_headroom_flag(
+            await _key_metadata(key), bool(body["headroom"])
+        )
 
     if len(update_body) == 1:  # 只有 key，没实际改动字段
         raise HTTPException(400, "至少要传 backend 或 max_budget/rpm/tpm/headroom")
@@ -637,7 +661,7 @@ async def _fetch_keys() -> list[dict[str, Any]]:
                 "spend": info.get("spend") or 0,
                 "max_budget": info.get("max_budget"),
                 "mappings": mappings,
-                # 该 key 是否挂了 headroom 压缩 guardrail
-                "headroom": _headroom_name() in (info.get("guardrails") or []),
+                # 该 key 是否压缩：全局默认开，只有打了 disable 标记的才是关
+                "headroom": not (info.get("metadata") or {}).get(_HEADROOM_DISABLE_FIELD, False),
             })
     return out

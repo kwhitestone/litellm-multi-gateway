@@ -34,9 +34,10 @@ keys.sh - 管理客户端访问 key（绑 user，用量按 user 分开统计）
 
 用法:
   ./keys.sh                    显示帮助 + 现有 key 列表
-  ./keys.sh new <user> [alias] [--backend ark|sub_ark|claude|zai|codex|逗号多选] [--headroom]
+  ./keys.sh new <user> [alias] [--backend ark|sub_ark|claude|zai|codex|逗号多选] [--no-headroom]
                  创建 key（默认后端 claude；--backend 决定该 key 走哪个后端）
-                 --headroom 给该 key 挂提示词压缩（需网关配了 HEADROOM_API_BASE）
+                 提示词压缩默认开启（网关配了 HEADROOM_API_BASE 时）；
+                 --no-headroom 关掉该 key 的压缩（--headroom 是默认值，写了等于没写）
   ./keys.sh list               列出所有 key（alias / user / hash）
   ./keys.sh update <key> [--backend ark|sub_ark|claude|zai|codex] [--headroom|--no-headroom]
                  动态改该 key 的 7 名路由 / 压缩开关（不重启 litellm）
@@ -96,8 +97,10 @@ case "${1:-help}" in
     while [ $# -gt 0 ]; do
       case "$1" in
         --backend) backend="$2"; shift 2 ;;
-        --headroom) headroom="1"; shift ;;
-        -h|--help) echo "用法: $0 new <user> [alias] [--backend ark|sub_ark|claude|zai|codex|逗号多选] [--headroom]"; exit 0 ;;
+        # 压缩默认开（config.yaml default_on=true）；--headroom 保留为兼容的空操作
+        --headroom) headroom="on"; shift ;;
+        --no-headroom) headroom="off"; shift ;;
+        -h|--help) echo "用法: $0 new <user> [alias] [--backend ark|sub_ark|claude|zai|codex|逗号多选] [--no-headroom]"; exit 0 ;;
         *) if [ -z "$user" ]; then user="$1"; elif [ -z "$alias" ]; then alias="$1"; fi; shift ;;
       esac
     done
@@ -114,7 +117,10 @@ case "${1:-help}" in
       body=$(KEY_USER="$user" KEY_ALIAS="$alias" AM="$am" KEY_HEADROOM="$headroom" python3 -c '
 import json,os
 d=json.loads(os.environ["AM"]); d["user_id"]=os.environ["KEY_USER"]; d["key_alias"]=os.environ["KEY_ALIAS"]
-if os.environ.get("KEY_HEADROOM"): d["guardrails"]=["headroom-compression"]
+hr=os.environ.get("KEY_HEADROOM")
+# 压缩全局默认开；只有 --no-headroom 才写 disable 标记（顶层 disable_global_guardrails
+# 是企业版门禁字段，写进 metadata 才不需要 license）
+if hr: d["metadata"]={"disable_global_guardrails": hr == "off"}
 print(json.dumps(d))')
     else
       # 多后端：短名选后端 + 7 名默认指 claude-sonnet-5（若含 claude）
@@ -122,7 +128,10 @@ print(json.dumps(d))')
       body=$(KEY_USER="$user" KEY_ALIAS="$alias" AM="$am" KEY_HEADROOM="$headroom" python3 -c '
 import json,os
 d=json.loads(os.environ["AM"]); d["user_id"]=os.environ["KEY_USER"]; d["key_alias"]=os.environ["KEY_ALIAS"]
-if os.environ.get("KEY_HEADROOM"): d["guardrails"]=["headroom-compression"]
+hr=os.environ.get("KEY_HEADROOM")
+# 压缩全局默认开；只有 --no-headroom 才写 disable 标记（顶层 disable_global_guardrails
+# 是企业版门禁字段，写进 metadata 才不需要 license）
+if hr: d["metadata"]={"disable_global_guardrails": hr == "off"}
 print(json.dumps(d))')
     fi
     [ -n "$body" ] || exit 1
@@ -208,12 +217,21 @@ print('✓ 删除成功:', d.get('message') or d.get('deleted_keys') or d)
     else
       am='{}'
     fi
-    body=$(KEY="$full" AM="$am" KEY_HEADROOM="$headroom" python3 -c '
+    # 改压缩开关要先读回现有 metadata：/key/update 的 metadata 是整体替换不是 merge，
+    # 直接覆盖会抹掉该 key 已有的 tag_rpm_limit / spend_logs_metadata 等字段
+    cur_meta='{}'
+    if [ -n "$headroom" ]; then
+      cur_meta=$(cg "$BASE/key/info?key=$full" -H "Authorization: Bearer $MASTER" \
+        | python3 -c 'import json,sys; print(json.dumps((json.load(sys.stdin).get("info") or {}).get("metadata") or {}))')
+    fi
+    body=$(KEY="$full" AM="$am" KEY_HEADROOM="$headroom" CUR_META="$cur_meta" python3 -c '
 import json,os
 d=json.loads(os.environ["AM"]); d["key"]=os.environ["KEY"]
 hr=os.environ.get("KEY_HEADROOM")
-if hr == "on": d["guardrails"]=["headroom-compression"]
-elif hr == "off": d["guardrails"]=[]
+if hr:
+    meta=json.loads(os.environ["CUR_META"])
+    meta["disable_global_guardrails"] = hr == "off"   # 增量改，其余字段原样保留
+    d["metadata"]=meta
 print(json.dumps(d))')
     cg -X POST "$BASE/key/update" \
       -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \

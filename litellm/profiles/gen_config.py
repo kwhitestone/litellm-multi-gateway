@@ -32,7 +32,14 @@ DEFAULT_OUT = HERE / "multi.yaml"
 # HEADROOM_API_BASE 有值即启用：生成 guardrails 段，LiteLLM 在 pre_call 把 messages
 # 发到 {api_base}/v1/compress 压缩后再转发上游。为空/未设置则完全不生成该段
 # （HeadroomGuardrail.__init__ 缺 api_base 会抛 ValueError 直接起不来，所以必须由这里控制）。
+#
+# 「按 key 开关」走 default_on=true + 逐 key 关闭（B-lite）：给 key 挂 guardrails=[...]
+# 是企业版字段，无 LITELLM_LICENSE 时 /key/generate 直接 403，所以反过来做——
+# 全局默认压缩，不想压的 key 写 metadata.disable_global_guardrails=true。
 HEADROOM_GUARDRAIL_NAME = "headroom-compression"
+# 关 key 级压缩的 metadata 字段名（LiteLLM 官方字段，见 custom_guardrail.py
+# get_disable_global_guardrail / litellm_pre_call_utils.py add_key_level_controls）
+HEADROOM_DISABLE_FIELD = "disable_global_guardrails"
 
 
 def headroom_settings(env: dict | None = None) -> dict | None:
@@ -41,7 +48,10 @@ def headroom_settings(env: dict | None = None) -> dict | None:
     HEADROOM_API_BASE        压缩服务地址（唯一开关，空=停用）
     HEADROOM_API_KEY         可选 Bearer token。这里不读值，只生成 os.environ/ 引用，
                              密钥不落进 config.yaml（与 provider key 同款处理）
-    HEADROOM_DEFAULT_ON      true=所有请求都压缩；默认 false=只有挂了该 guardrail 的 key 生效
+    HEADROOM_DEFAULT_ON      默认 true=所有请求都压缩，逐 key 用 metadata
+                             disable_global_guardrails=true 关（B-lite 语义）。
+                             显式设 false 回到旧语义（只有挂了该 guardrail 的 key 压缩），
+                             但挂 guardrails 需要企业版 license，无 license 会 403。
     HEADROOM_UNREACHABLE     fail_open（默认，压缩服务挂了放行未压缩请求）| fail_closed（报错）
     """
     env = os.environ if env is None else env
@@ -55,7 +65,8 @@ def headroom_settings(env: dict | None = None) -> dict | None:
         "api_base": api_base,
         # 有 HEADROOM_API_KEY 才写 api_key，且写成 os.environ/ 引用而非明文
         "api_key": "os.environ/HEADROOM_API_KEY" if (env.get("HEADROOM_API_KEY") or "").strip() else None,
-        "default_on": (env.get("HEADROOM_DEFAULT_ON") or "").strip().lower() in ("1", "true", "yes"),
+        # 默认 true（B-lite）：不设该变量 = 全局压缩，逐 key 关。显式 false/0/no 才关全局。
+        "default_on": (env.get("HEADROOM_DEFAULT_ON") or "true").strip().lower() not in ("0", "false", "no"),
         "unreachable_fallback": fallback,
     }
 

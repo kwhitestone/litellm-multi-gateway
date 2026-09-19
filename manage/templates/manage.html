@@ -96,9 +96,9 @@
       </div>
       {% if headroom_enabled %}
       <div style="grid-column:1/-1">
-        <label><input type="checkbox" id="headroom"> 启用提示词压缩（headroom）</label>
+        <label><input type="checkbox" id="headroom" checked> 启用提示词压缩（headroom，默认开）</label>
         <div class="hint">该 key 的请求先经 headroom 压缩再转发上游，省 input token；客户端无需改动。
-          单次想跳过压缩可加 header <code>x-headroom-bypass: true</code></div>
+          取消勾选则该 key 不压缩。单次想跳过压缩可加 header <code>x-headroom-bypass: true</code></div>
       </div>
       {% endif %}
     </div>
@@ -258,7 +258,8 @@
       const budget = document.getElementById('budget').value;
       const rpm = document.getElementById('rpm').value;
       const backends = [...document.querySelectorAll('.be:checked')].map(c => c.value);
-      // headroom 勾选框只在服务端启用压缩时渲染，未渲染则不传该字段
+      // headroom 勾选框只在服务端启用压缩时渲染，未渲染则不传该字段。
+      // 压缩默认开，取消勾选要显式下发 false（后端据此写 disable 标记）
       const hrBox = document.getElementById('headroom');
       if (!user) return toast('请填用户名', true);
       if (!backends.length) return toast('至少选一个后端', true);
@@ -267,7 +268,7 @@
       btn.disabled = true; btn.textContent = '创建中…';
       try {
         const body = { user, alias, backend: backends.join(','), max_budget: budget, rpm };
-        if (hrBox && hrBox.checked) body.headroom = true;
+        if (hrBox) body.headroom = hrBox.checked;
         const r = await fetch('/manage/api/new', {
           method: 'POST', headers, body: JSON.stringify(body)
         });
