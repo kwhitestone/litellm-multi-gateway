@@ -103,16 +103,23 @@ def _parse_bool_after_colon(s: str, key: str) -> bool:
 
 
 _config_cache: Optional[_VisionConfig] = None
+_config_cache_mtime: Optional[float] = None
 
 
 def _load_vision_config() -> _VisionConfig:
     """扫 config.yaml：头部 native_vision 作全局默认，model_list 里每条的 needs_vision 注释
     + model_name 别名 / litellm_params.model 字段建立 per-model 映射。
 
-    结果进程内缓存：config.yaml 是只读挂载，进程生命周期内不会变，
-    而这函数原先每个请求都重读一次文件（两个 hook 各一次）。"""
-    global _config_cache
-    if _config_cache is not None:
+    结果进程内缓存，按 config.yaml 的 mtime 失效：backends 热重载（backends_sync
+    regen_config_strict）会原地重写 config.yaml，若缓存不失效，needs_vision 改动
+    要重启实例才生效。mtime 检查是单次 os.stat，比原先进化前每请求重读全文件便宜。
+    """
+    global _config_cache, _config_cache_mtime
+    try:
+        mtime = os.path.getmtime(CONFIG_PATH)
+    except OSError:
+        mtime = None
+    if _config_cache is not None and _config_cache_mtime == mtime:
         return _config_cache
 
     global_default = False
@@ -124,6 +131,7 @@ def _load_vision_config() -> _VisionConfig:
     except FileNotFoundError:
         _log(f"config.yaml 未找到({CONFIG_PATH})，默认 needs_vision=false（透传）")
         _config_cache = _VisionConfig(per_model, global_default, per_strip)
+        _config_cache_mtime = mtime
         return _config_cache
 
     in_model_list = False
@@ -186,6 +194,7 @@ def _load_vision_config() -> _VisionConfig:
     # 提交最后一条（config 以 model_list 结尾、没有后续顶格段时）
     _commit()
     _config_cache = _VisionConfig(per_model, global_default, per_strip)
+    _config_cache_mtime = mtime
     _log(f"vision config 已加载: {len(per_model)} 个 model key, global_default={global_default}")
     return _config_cache
 
