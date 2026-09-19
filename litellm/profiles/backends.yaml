@@ -46,7 +46,7 @@ backends:
     strip_thinking: true   # ark 不认 thinking.type=disabled（Claude Code 默认会发），剥掉；zai/claude 不需要
     models:
       glm: { litellm_model: anthropic/glm-5.3 }
-      glm-flash: { litellm_model: anthropic/glm-5.3-flash }
+      glm-flash: { litellm_model: anthropic/glm-5.3-flash, needs_vision: false }
     mapping:
       "*": glm          # 所有 claude 名 -> ark-glm
 
@@ -76,7 +76,7 @@ backends:
     needs_vision: true
     models:
       glm: { litellm_model: anthropic/glm-5.3 }
-      glm-flash: { litellm_model: anthropic/glm-5.3-flash }
+      glm-flash: { litellm_model: anthropic/glm-5.3-flash, needs_vision: false }
       kimi: { litellm_model: anthropic/kimi-k2.7-code }
       deepseek: { litellm_model: anthropic/deepseek-latest }   # 实际落到 deepseek-v4-pro
       minimax: { litellm_model: anthropic/minimax-m3 }
@@ -90,7 +90,7 @@ backends:
     needs_vision: true
     models:
       glm: { litellm_model: anthropic/glm-5.3 }
-      glm-flash: { litellm_model: anthropic/glm-5.3-flash }
+      glm-flash: { litellm_model: anthropic/glm-5.3-flash, needs_vision: false }
     mapping:
       "*": glm         # 所有 claude 名 -> zai-glm
 

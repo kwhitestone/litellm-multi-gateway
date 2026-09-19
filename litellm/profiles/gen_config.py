@@ -152,10 +152,11 @@ def gen_multi_yaml(cfg: dict) -> str:
         "model_list:",
     ]
     for backend, b in cfg["backends"].items():
-        nv = b.get("needs_vision", False)
-        st = b.get("strip_thinking", False)
-        lines.append(f"  # ===== {backend}（needs_vision={str(nv).lower()}）=====")
+        lines.append(f"  # ===== {backend}（needs_vision={str(b.get('needs_vision', False)).lower()}）=====")
         for model, spec in b["models"].items():
+            # spec 级覆盖后端级（如 glm-flash 原生多模态而 glm 需转图，同一后端分着标）
+            nv = spec.get("needs_vision", b.get("needs_vision", False))
+            st = spec.get("strip_thinking", b.get("strip_thinking", False))
             mn = model_name_for(backend, model)
             lm = spec["litellm_model"]
             api_base = b["api_base"]
