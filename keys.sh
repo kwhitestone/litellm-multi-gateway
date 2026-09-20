@@ -13,13 +13,34 @@ cg() { curl -s --noproxy '*' "$@"; }
 # 多后端：$GEN_CONFIG multi-aliases <b1,b2,...>   → {aliases, models} JSON
 # 改后端配置见 backends.yaml，改完跑：./keys.sh gen-config 重生成 multi.yaml
 
+# /key/list 不带分页参数只返回第一页（默认页大小 10）→ 会漏 key。
+# 分页拉全：size=100，按 total_pages 翻页；每行输出一个 key hash。
+fetch_all_keys() {
+  local page=1 total_pages=1 out
+  while :; do
+    out=$(cg "$BASE/key/list?page=$page&size=100" -H "Authorization: Bearer $MASTER" \
+      | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print(d.get('total_pages') or 1)
+print('\n'.join(d.get('keys',[])))
+" 2>/dev/null) || return 0
+    total_pages=$(echo "$out" | head -1)
+    [[ "$total_pages" =~ ^[0-9]+$ ]] || total_pages=1
+    echo "$out" | tail -n +2
+    [ "$page" -ge "$total_pages" ] && break
+    page=$((page+1))
+  done
+}
+
 # 解析 key 输入：明文(sk-...)直接用；否则按 hash/前缀补全成完整 hash
 resolve_key() {
   local q="$1"
   [[ "$q" == sk-* ]] && { echo "$q"; return; }
-  cg "$BASE/key/list" -H "Authorization: Bearer $MASTER" | python3 -c "
-import json,sys
-d=json.load(sys.stdin); ks=d.get('keys',[]); q=sys.argv[1]
+  fetch_all_keys | python3 -c "
+import sys
+q=sys.argv[1]
+ks=[k.strip() for k in sys.stdin if k.strip()]
 hits=[k for k in ks if k==q or k.startswith(q)]
 print(hits[0] if hits else '')
 " "$q"
@@ -56,7 +77,7 @@ EOF
 }
 
 list_keys() {
-  hashes=$(cg "$BASE/key/list" -H "Authorization: Bearer $MASTER" | python3 -c "import json,sys;d=json.load(sys.stdin);print('\n'.join(d.get('keys',[])))" 2>/dev/null || true)
+  hashes=$(fetch_all_keys)
   if [ -z "$hashes" ]; then echo "(还没有 key，或 litellm 没起)"; return; fi
   n=$(echo "$hashes" | grep -c .)
   echo "key 列表（共 $n 个，delete 用完整 hash）："
@@ -162,12 +183,10 @@ print('  OpenAI 客户端: base_url=http://127.0.0.1:4001/v1  api_key='+k)
   delete)
     q="${2:?用法: $0 delete <hash 或前缀>}"
     # litellm /key/delete 要完整 hash；用户可能只拿到前缀（list 截断显示），这里解析成完整 hash
-    full=$(cg "$BASE/key/list" -H "Authorization: Bearer $MASTER" \
-      | python3 -c "
-import json,sys
-d=json.load(sys.stdin)
-ks=d.get('keys',[])
+    full=$(fetch_all_keys | python3 -c "
+import sys
 q=sys.argv[1]
+ks=[k.strip() for k in sys.stdin if k.strip()]
 hits=[k for k in ks if k==q or k.startswith(q)]
 if not hits: sys.exit(1)
 print(hits[0])   # 取第一个匹配
