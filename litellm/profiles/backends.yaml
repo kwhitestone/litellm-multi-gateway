@@ -63,6 +63,7 @@ backends:
       claude-sonnet-4-8: { litellm_model: anthropic/claude-sonnet-4-8 }
       claude-opus-4-8: { litellm_model: anthropic/claude-opus-4-8 }
       claude-opus-5: { litellm_model: anthropic/claude-opus-5 }
+      claude-opus-5-5: { litellm_model: anthropic/claude-opus-5-5 }
       claude-fable-5: { litellm_model: anthropic/claude-fable-5 }
 
   # ===== sub_ark（nd-sub2api 聚合网关，Anthropic 协议，纯文本端点，图片需转文字）=====
