@@ -51,7 +51,9 @@ backends:
       "*": glm          # 所有 claude 名 -> ark-glm
 
   # ===== claude（公司网关，原生多模态，图片原图透传）=====
-  # mapping 省略 → identity：claude-sonnet-5 映射到 claude-sonnet-5（名即真名）
+  # mapping：sonnet-5/opus-5 收口到 5-5 版，其余 identity。全部名字显式列出
+  # （无 "*" 兜底，新增模型必须同步加一行，否则 resolve_mapping 直接报错）。
+  # 原版 claude-sonnet-5 / claude-opus-5 仍在 models 里，改回 identity 即可恢复。
   claude:
     api_base: https://aicoding-gateway.ndaeweb.com:8443
     key_env: CLAUDE_CODE_KEY
@@ -65,6 +67,17 @@ backends:
       claude-opus-5: { litellm_model: anthropic/claude-opus-5 }
       claude-opus-5-5: { litellm_model: anthropic/claude-opus-5-5 }
       claude-fable-5: { litellm_model: anthropic/claude-fable-5 }
+      claude-sonnet-5-5: { litellm_model: anthropic/claude-sonnet-5-5 }
+    mapping:
+      claude-haiku-4-5-20251001: claude-haiku-4-5-20251001
+      claude-sonnet-4-6: claude-sonnet-4-6
+      claude-sonnet-5: claude-sonnet-5-5
+      claude-sonnet-4-8: claude-sonnet-4-8
+      claude-opus-4-8: claude-opus-4-8
+      claude-opus-5: claude-opus-5-5
+      claude-opus-5-5: claude-opus-5-5
+      claude-fable-5: claude-fable-5
+      claude-sonnet-5-5: claude-sonnet-5-5
 
   # ===== sub_ark（nd-sub2api 聚合网关，Anthropic 协议，纯文本端点，图片需转文字）=====
   # api_base 写死而非读 SUB_ARK_BASE_URL：管理页「上游直连测试」直接拿这个值拼 URL，
